@@ -1,8 +1,6 @@
 from dispatcher import  NacosConfig
 
-
 ncs = NacosConfig('localhost', 'nacos', 'nacos')
-
 @ncs.values('test_json', 'keys')
 class Test(object):
     secretKey = None

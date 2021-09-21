@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from requests import Response, request
 import yaml,json
 from typing import Union
-from models import *
+from .models import *
 
 
 DEFAULT_GROUP_NAME = 'DEFAULT_GROUP'
@@ -117,6 +117,10 @@ class NacosClient(object):
 class NacosConfig(NacosClient):
     """配置
     >>> nc = NacosConfig('localhost', 'nacos', 'nacos')
+    >>> nc.get('test_yaml', 'spring.datasource.dynamic.enabled')
+    False
+    >>> nc.get('test_json', 'keys.secretKey')
+    'iGNddHce42LNtOc0sc58p94ayRxZNR'
     >>> data = {"serviceName":"ces-ois","healthyOnly":True,"namespaceId":"dev","groupName":"DEFAULT_GROUP"}
     >>> nc.post('test_update',data,data_type='JSON')
     True
@@ -160,13 +164,7 @@ class NacosConfig(NacosClient):
         raise NacosException('此功能尚未实现')
 
     def get(self, data_id, path, group=None, tenant=None) -> Any:
-        """取配置值
-        >>> nc = NacosConfig('localhost', 'nacos', 'nacos')
-        >>> print(nc.get('test_yaml', 'spring.datasource.dynamic.enabled'))
-        False
-        >>> print(nc.get('test_json', 'keys.secretKey'))
-        iGNddHce42LNtOc0sc58p94ayRxZNR
-        """
+        """取配置值"""
         api = '/nacos/v1/cs/configs'
         params = self.kwargs2dict(dataId=data_id, group=group, tenant=tenant)
         rsp = self.get_response(api, params)
@@ -556,8 +554,8 @@ class NacosNameSpace(NacosClient):
         return self.paras_body(rsp)
 
 
+__note__ = '''
 if __name__ == '__main__':
     import doctest
     doctest.testmod(optionflags=doctest.ELLIPSIS)
-
-
+'''
