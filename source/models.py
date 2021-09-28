@@ -105,22 +105,22 @@ class InstanceItem(BaseModel):
     clusterName: str
     serviceName: str
     metadata: dict
-    instanceHeartBeatInterval: int
-    ipDeleteTimeout: int
-    instanceHeartBeatTimeOut: int
+    instanceHeartBeatInterval: Optional[int]
+    ipDeleteTimeout: Optional[int]
+    instanceHeartBeatTimeOut: Optional[int]
 
 
 class InstanceList(BaseModel):
     name: str
-    groupName: str
     clusters: str
-    cacheMillis: int
     hosts: List[InstanceItem]
-    lastRefTime: int
+    groupName: Optional[str]
+    cacheMillis: Optional[int]
+    lastRefTime: Optional[int]
     checksum: Optional[str]
-    allIPs: bool
-    reachProtectionThreshold: bool
-    valid: bool
+    allIPs: Optional[bool]
+    reachProtectionThreshold: Optional[bool]
+    valid: Optional[bool]
 
 
 class Beat(BaseModel):
