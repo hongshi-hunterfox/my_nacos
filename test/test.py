@@ -1,15 +1,14 @@
+# coding=utf-8
 from source import  NacosConfig
 
 
 # 这个Nacos服务启用了ahtn
-ncs = NacosConfig('localhost:8848', 'nacos', 'nacos')
-
+ncs = NacosConfig('localhost', 'nacos', 'nacos')
 _data ="""# 测试数据
 keys:
     accessKey: <<accessKey>>
     secretKey: <<secretKey>>
-group: <<group>>
-"""
+group: <<group>>"""
 ncs.post('test_json',_data, data_type='yaml')
 
 
@@ -19,25 +18,31 @@ ncs.post('test_json',_data, data_type='yaml')
 #   实例call时类属性与实例属性被赋值
 @ncs.values('test_json', 'keys')
 class Test(object):
-    OtherField = '--OtherField--'
+    OtherField = ['--OtherField--']
     secretKey = '--secretKey--'
     def __init__(self):
         self.accessKey = None
+
     def __call__(self, *args, **kwargs):
         return f'{self.accessKey},{self.secretKey}'
 
     @property
     @ncs.value('test_json','group') # value装饰器只能在@property装饰器之后
     def group_value(self):
-        pass
+        raise BaseException('不能读取配置信息')
 
     def keys(self):
         return f'{self.secretKey},{self.accessKey}'
+
+    @classmethod
+    def add_field(cls, field):
+        cls.OtherField.append(field)
 
 
 # 直接访问类属性,它已被赋值
 print(f'Test.secretKey:{Test.secretKey}')
 a = Test()
+print('-----')
 # 配置中没有的属性不被改变
 print(f'a.OtherField1:{a.OtherField}')
 # 类属性被赋值
