@@ -252,13 +252,14 @@ class NacosConfig(NacosClient):
     def values(self, data_id, path, group=None, tenant=None, only_class=False):
         """类装饰器
         被装饰的类中与指定配置的子项同名的属性将得到相应的值
-        当 only_class 为 True 时,对象的__init__/__call__方法也将被装饰,这使实例属性也被赋值
+        only_class: 为 True 时,对象的__init__/__call__方法也将被装饰,这使实例属性也被赋值
         """
         def class_wrapper(_class):
             """读取配置值作为类的属性"""
             def wrap_class_init(func):
                 @wraps(func)
                 def call_func(*args, **kwargs):
+                    func(*args, **kwargs)
                     data = self.get(data_id, path, group, tenant)
                     NacosConfig._fetch_attrs(args[0], data)
                 return call_func
@@ -653,23 +654,23 @@ class NacosNameSpace(NacosClient):
             raise NacosException(result['message'])
         return [NameSpace(**item) for item in result['data']]
 
-    def create(self, id:str, show_name: str, desc: str=None)->bool:
-        paras = self._kwargs2dict(customNamespaceId=id,
+    def create(self, name_space:str, show_name: str, desc: str=None)->bool:
+        paras = self._kwargs2dict(customNamespaceId=name_space,
                                   namespaceName=show_name,
                                   namespaceDesc=desc)
         rsp = self._get_response(self.api, paras, 'POST')
         return self._paras_body(rsp)
 
-    def update(self, id:str, show_name: str, desc: str)->bool:
+    def update(self, name_space:str, show_name: str, desc: str)->bool:
         """修改命名空间"""
-        paras = self._kwargs2dict(namespace=id,
+        paras = self._kwargs2dict(namespace=name_space,
                                   namespaceShowName=show_name,
                                   namespaceDesc=desc)
         rsp = self._get_response(self.api, paras, 'PUT')
         return self._paras_body(rsp)
 
-    def delete(self, id:str)->bool:
-        paras = self._kwargs2dict(namespaceId=id)
+    def delete(self, name_space:str)->bool:
+        paras = self._kwargs2dict(namespaceId=name_space)
         rsp = self._get_response(self.api, paras, 'DELETE')
         return self._paras_body(rsp)
 
