@@ -1,13 +1,15 @@
 # coding=utf-8
 """Nacos API 调用"""
-import re
+import re, yaml, json
+from copy import deepcopy
+from functools import wraps
 from datetime import datetime
 from urllib.parse import urlencode
 from requests import Response, request
-import yaml,json
-from typing import Union,Callable
-from .models import *
-from functools import wraps
+from typing import Union,Callable,Any,List
+from threading import Timer
+from .models import Service,ServicesList,Switches,Metrics,Server,InstanceInfo,InstanceList,Beat,BeatInfo,NameSpace
+
 
 DEFAULT_GROUP_NAME = 'DEFAULT_GROUP'
 
@@ -106,7 +108,7 @@ class NacosClient(object):
             data = urlencode(params)
         else:  # GET,PUT,DELETE
             url = self._get_full_path(self.server, path, params=params)
-        rsp = request(method, url, data = data, headers=headers)
+        rsp = request(method, url, data=data, headers=headers)
         if rsp is None or rsp.status_code != 200:
             raise NacosException(rsp.status_code, rsp.text)
         return rsp
@@ -254,6 +256,21 @@ class NacosConfig(NacosClient):
         """
         def class_wrapper(_class):
             """读取配置值作为类的属性"""
+            def wrap_class_init(func):
+                @wraps(func)
+                def call_func(*args, **kwargs):
+                    data = self.get(data_id, path, group, tenant)
+                    NacosConfig._fetch_attrs(args[0], data)
+                return call_func
+
+            def wrap_class_call(func):
+                @wraps(func)
+                def call_func(*args, **kwargs):
+                    data = self.get(data_id, path, group, tenant)
+                    NacosConfig._fetch_attrs(args[0], data)
+                    return func(*args, **kwargs)
+                return call_func
+
             try:
                 cfg = self.get(data_id, path, group, tenant)
                 for key in cfg.keys():
@@ -262,19 +279,6 @@ class NacosConfig(NacosClient):
                             key in _class.__dict__.keys() and \
                             _class.__dict__[key] is not Callable:
                         setattr(_class, key, cfg.get(key))
-                def wrap_class_init(func):
-                    @wraps(func)
-                    def call_func(*args, **kwargs):
-                        data = self.get(data_id, path, group, tenant)
-                        NacosConfig._fetch_attrs(args[0], data)
-                    return call_func
-                def wrap_class_call(func):
-                    @wraps(func)
-                    def call_func(*args, **kwargs):
-                        data = self.get(data_id, path, group, tenant)
-                        NacosConfig._fetch_attrs(args[0], data)
-                        return func(*args, **kwargs)
-                    return call_func
                 if not only_class:
                     _class.__init__ = wrap_class_init(_class.__init__)
                     _class.__call__= wrap_class_call(_class.__call__)
@@ -416,6 +420,34 @@ class NacosService(NacosClient):
         # return self._paras_body(rsp)
 
 
+class ThreadBeat(object):
+    def __init__(self, nc, beat):
+        self.nc = nc
+        self.beat = beat
+        self.__thread = None
+        self.start()
+
+    def start(self):
+        if self.__thread is None:
+            self.__loop_beat__()
+
+    def __loop_beat__(self):
+        if self.nc:
+            beat_info = self.nc.beating(beat=self.beat)
+            interval = float(beat_info.clientBeatInterval / 1000)
+            self.__thread = Timer(interval, self.__loop_beat__)
+            self.__thread.start()
+
+    def stop(self):
+        if self.__thread:
+            self.__thread.cancel()
+            self.__thread = None
+
+    def __del__(self):
+        if self.__thread:
+            self.stop()
+
+
 class NacosInstance(NacosClient):
     """实例
     >>> ns = NacosService('localhost', 'nacos', 'nacos')
@@ -443,6 +475,7 @@ class NacosInstance(NacosClient):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.__thread_beats__ = {}  # {(service,ip,port): Timer()}
 
     def register(self, service, ip, port,
                  name_space=None,weight=None,enabled=None,healthy=None,
@@ -522,30 +555,76 @@ class NacosInstance(NacosClient):
         rsp = self._get_response(api, params)
         return InstanceList(**self._paras_body(rsp))
 
-    def beating(self, service, beat:Beat=None, group=None, ephemeral=None,
-                ip=None, port=None, cluster:str=None, scheduled:bool=None,
-                weight:int=None, metadata:dict=None
-                )->BeatInfo:
-        """实例心跳"""
-        assert beat or (ip and port)
-        api = '/nacos/v1/ns/instance/beat'
+    @staticmethod
+    def get_beat(service=None, ip=None, port=None, group=None,
+                 cluster:str=None, scheduled:bool=None, weight:int=None,
+                 metadata:dict=None, beat:Beat=None)-> Beat:
+        assert beat or (service and ip and port)
         if beat is None:
-            beat = Beat(serviceName=f'{group if group else DEFAULT_GROUP_NAME}@@{service}',
+            group = group if group else DEFAULT_GROUP_NAME
+            beat = Beat(serviceName=f'{group}@@{service}',
                         ip=ip,
                         port=port)
-            if cluster: beat.cluster = cluster
-            if scheduled: beat.scheduled = scheduled
-            if weight: beat.weight = weight
-            if metadata: beat.metadata = metadata
-        params = self._kwargs2dict(serviceName=service,beat=beat.json(),
-                                   groupName=group,ephemeral=ephemeral)
+        if cluster: beat.cluster = cluster
+        if scheduled: beat.scheduled = scheduled
+        if weight: beat.weight = weight
+        if metadata: beat.metadata = metadata
+        return beat
+
+    def calc_item(self, d: Union[dict, list, tuple]):
+        """如果字典值、列表项是函数,使它们的值为函数的返回值"""
+        for k, v in d.items():
+            if callable(v):
+                d[k] = v()
+            elif isinstance(v, (list, tuple)):
+                self.calc_item(d[k])
+
+    def beating(self, beat:Beat=None, service=None, ip=None, port=None,
+                group=None, cluster:str=None, scheduled:bool=None,
+                weight: int = None, metadata:dict=None, ephemeral=None,
+                )->BeatInfo:
+        """实例心跳"""
+        api = '/nacos/v1/ns/instance/beat'
+        beat = self.get_beat(service=service, ip=ip, port=port, group=group,
+                             cluster=cluster, scheduled=scheduled,
+                             weight=weight, metadata=metadata, beat=beat)
+        new_beat = deepcopy(beat)
+        self.calc_item(new_beat.metadata)
+        print(f'NacosInstance.beating:{new_beat}')
+        if service is None:
+            service = beat.serviceName.split('@')[-1]
+        group = group if group else DEFAULT_GROUP_NAME
+        params = self._kwargs2dict(serviceName=service,
+                                   beat=new_beat.json(separators=(',',':')),
+                                   groupName=group,
+                                   ephemeral=ephemeral)
         rsp = self._get_response(api, params, 'PUT')
         return BeatInfo(**self._paras_body(rsp))
 
-    def autobeating(self):
-        # TODO: 装饰器
-        #   在对象存续期定时调用beating
-        pass
+    def beating_start(self, beat: Beat):
+        """开始自动心跳
+        for example:
+            if not ni.register(service,ip,port):
+                raise NacosException('无法注册服务')
+
+            self.beat = ni.get_beat(service, ip, port,
+                                    metadata={'starttime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
+
+            if not ni.beating_start(self.beat):
+                raise NacosException('开始自动心跳失败')
+        """
+        if beat:
+            s_beat = beat.json(separators=(',',':'),exclude={'metadata'})
+            if s_beat not in self.__thread_beats__.keys():
+                self.__thread_beats__[s_beat] = ThreadBeat(self, beat)
+
+    def beating_stop(self, beat:Beat):
+        """停止自动心跳
+        """
+        if beat:
+            s_beat = beat.json(separators=(',',':'),exclude={'metadata'})
+            if s_beat in self.__thread_beats__.keys():
+                self.__thread_beats__.pop(s_beat)
 
 
 class NacosNameSpace(NacosClient):
