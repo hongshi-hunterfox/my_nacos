@@ -2,7 +2,7 @@
 from source import  NacosConfig
 
 
-# 这个Nacos服务启用了ahtn
+# 这个 Nacos 服务启用了 auth
 ncs = NacosConfig('localhost', 'nacos', 'nacos')
 _data ="""# 测试数据
 keys:
@@ -20,8 +20,10 @@ ncs.post('test_json',_data, data_type='yaml')
 class Test(object):
     OtherField = ['--OtherField--']
     secretKey = '--secretKey--'
-    def __init__(self):
+    def __init__(self,other_field=None):
         self.accessKey = None
+        if other_field:
+            self.OtherField = other_field
 
     def __call__(self, *args, **kwargs):
         return f'{self.accessKey},{self.secretKey}'
@@ -55,3 +57,6 @@ print(f'a.group:{a.group_value}')
 print(f'a.keys():{a.keys()}')
 # __call__ 装饰效果
 print(f'a():{a()}')
+print('-----------------------')
+b=Test('new instance')
+print(f'b.OtherField:{b.OtherField}')
