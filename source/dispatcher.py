@@ -1,6 +1,6 @@
 # coding=utf-8
 """Nacos API 调用"""
-import re, json
+import re, json, hashlib
 from copy import deepcopy
 from random import randint
 from functools import wraps
@@ -10,8 +10,9 @@ from requests import Response, request
 from typing import Union,Callable,Any,List,Dict
 from threading import Timer
 
+from .buffer import new_buffer
 from .exceptions import NacosException, NacosClientException
-from .consts import DEFAULT_GROUP_NAME
+from .consts import DEFAULT_GROUP_NAME, ConfigBufferMode
 from .models import Service, ServicesList, Switches, Metrics, Server, InstanceInfo, \
     InstanceList, Beat, BeatInfo, NameSpace, InstanceItem, ConfigData
 
@@ -137,12 +138,17 @@ class NacosConfig(NacosClient):
     >>> history is not None
     True
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args,
+                 buffer_mode:ConfigBufferMode = ConfigBufferMode.nothing,
+                 **kwargs):
         super().__init__(*args, **kwargs)
-        # 配置缓存
-        #   监听配置,当变更发生时,重新获取配置值
-        #   get时优先读取缓存，缓存未命中添加相应监听
-        self.config_buffer = {}  # {dataid^group^tenant, md5, obj}
+        self.__buffer = None
+        if buffer_mode is None:
+            buffer_mode = buffer_mode!=ConfigBufferMode.nothing
+        if buffer_mode!=ConfigBufferMode.nothing:
+            pattern = re.compile(r'http[s]?://([\w.]+):(\d+).*')
+            ip, port = pattern.search(self.server).groups()
+            self.__buffer = new_buffer(buffer_mode, ip, eval(port))
 
     @classmethod
     def _paras(cls, rsp: Response) -> ConfigData:
@@ -164,10 +170,16 @@ class NacosConfig(NacosClient):
 
     def get(self, data_id, group=None, tenant=None) -> ConfigData:
         """取配置值"""
-        api = '/nacos/v1/cs/configs'
-        params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
-        rsp = self._get_response(api, params)
-        return self._paras(rsp)
+        if self.__buffer:
+            config = self.__buffer.get(data_id, group, tenant)
+        else:
+            api = '/nacos/v1/cs/configs'
+            params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
+            rsp = self._get_response(api, params)
+            config = self._paras(rsp)
+            if self.__buffer and config:
+                self.__buffer.set(config, data_id, group, tenant)
+        return config
 
     def post(self, data_id, data, group=None, tenant=None, data_type=None
              ) -> bool:
@@ -177,14 +189,23 @@ class NacosConfig(NacosClient):
         params = self._kwargs2dict(dataId=data_id, content=data, group=group,
                                    tenant=tenant,type=data_type)
         rsp = self._get_response(api, params, method='POST')
-        return self._paras_body(rsp)
+        success = self._paras_body(rsp)
+        if success and self.__buffer:
+            config = ConfigData(config_type=data_type,
+                                config_md5=hashlib.md5(data.encode()).hexdigest(),
+                                data=data)
+            self.__buffer.set(config, data_id, group, tenant)
+        return success
 
     def delete(self, data_id, group=None, tenant=None) -> bool:
         """删除配置"""
         api = '/nacos/v1/cs/configs'
         params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
         rsp = self._get_response(api, params, method='DELETE')
-        return self._paras_body(rsp)
+        success = self._paras_body(rsp)
+        if success and self.__buffer:
+            self.__buffer.delete(data_id, group, tenant)
+        return success
 
     def history(self, data_id,
                 group=None, tenant=None, page_no=None, page_size=None, nid=None
