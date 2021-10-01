@@ -145,7 +145,7 @@ class NacosConfig(NacosClient):
         self.config_buffer = {}  # {dataid^group^tenant, md5, obj}
 
     @classmethod
-    def _paras(cls, rsp: Response, path=None) -> ConfigData:
+    def _paras(cls, rsp: Response) -> ConfigData:
         """从 Response 生产 ConfigData"""
         config = ConfigData(config_type=rsp.headers['config-type'],
                             config_md5=rsp.headers['content-md5'],
