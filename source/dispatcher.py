@@ -1,6 +1,6 @@
 # coding=utf-8
 """Nacos API 调用"""
-import re, yaml, json
+import re, json
 from copy import deepcopy
 from random import randint
 from functools import wraps
@@ -150,10 +150,6 @@ class NacosConfig(NacosClient):
         config = ConfigData(config_type=rsp.headers['config-type'],
                             config_md5=rsp.headers['content-md5'],
                             data=rsp.text)
-        if config.config_type == 'yaml':
-            config.data = yaml.load(config.data, Loader=yaml.SafeLoader)
-        elif config.config_type == 'json':
-            config.data = json.loads(config.data)
         return config
 
     def listener(self, data_id, group=None, tenant=None):

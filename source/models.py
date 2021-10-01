@@ -1,4 +1,5 @@
 # coding=utf-8
+import yaml, json
 from pydantic import BaseModel
 from typing import Optional,List,Any
 from .exceptions import NacosClientException
@@ -7,11 +8,22 @@ from .exceptions import NacosClientException
 class ConfigData(BaseModel):
     config_type: str
     config_md5: str
-    data: Any
+    data: str
+    dict_obj: Optional[Any]
+
+    def build_dict(self):
+        if self.config_type == 'yaml':
+            self.dict_obj = yaml.load(self.data, Loader=yaml.SafeLoader)
+        elif self.config_type == 'json':
+            self.dict_obj = json.loads(self.data)
+        else:
+            self.dict_obj = self.data
 
     def value(self, path: str):
         path = path if path else ''
-        data = self.data
+        if self.dict_obj is None:
+            self.build_dict()
+        data = self.dict_obj
         try:
             for key in path.split('.'):
                 data = data[key]
