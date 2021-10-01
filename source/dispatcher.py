@@ -2,21 +2,21 @@
 """Nacos API 调用"""
 import re, yaml, json
 from copy import deepcopy
+from random import randint
 from functools import wraps
 from datetime import datetime
 from urllib.parse import urlencode
 from requests import Response, request
 from typing import Union,Callable,Any,List
 from threading import Timer
-from .models import Service,ServicesList,Switches,Metrics,Server,InstanceInfo,\
-    InstanceList,Beat,BeatInfo,NameSpace
-
-
-DEFAULT_GROUP_NAME = 'DEFAULT_GROUP'
+from .consts import DEFAULT_GROUP_NAME
+from .models import Service, ServicesList, Switches, Metrics, Server, InstanceInfo, \
+    InstanceList, Beat, BeatInfo, NameSpace, InstanceItem
 
 
 class NacosException(BaseException): pass
 class NacosClientException(BaseException): pass
+
 
 class Token(object):
     def __init__(self, server,user,pwd):
@@ -558,6 +558,14 @@ class NacosInstance(NacosClient):
                                    healthyOnly=healthy_only)
         rsp = self._get_response(api, params)
         return InstanceList(**self._paras_body(rsp))
+
+    def select_one(self, service, cluster=None)->InstanceItem:
+        """随机选取一名幸运观众 :)"""
+        instances = self.list(service, cluster=cluster, healthy_only=True).hosts
+        if len(instances) < 1:
+            raise NacosClientException(f'no healthy instances for service {service}')
+        sel = randint(0, len(instances)-1)
+        return instances[sel]
 
     @staticmethod
     def get_beat(service=None, ip=None, port=None, group=None,
