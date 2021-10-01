@@ -20,6 +20,27 @@ beat = Beat(serviceName='test-beat', ip='127.0.0.1', port=7333,
 def default():
     return 'Nacos 心跳测试页面'
 
+@app.router.get('/up')
+def up():
+    try:
+        ni.register('test-beat', '127.0.0.1', 7333,
+                    metadata={'starttime': s_time_now(),
+                              'lasttime': s_time_now()})
+        ni.beating_start(beat)
+        ok=True
+    except (BaseException,):
+        ok=False
+    return ok
+
+@app.router.get('/down')
+def down():
+    try:
+        ni.delete('test-beat', '127.0.0.1', 7333)
+        ni.beating_stop(beat)
+        ok=True
+    except (BaseException,):
+        ok=False
+    return ok
 
 ni.beating_start(beat)
 uvicorn.run(app = app,

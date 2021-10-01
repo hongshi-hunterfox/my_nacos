@@ -7,7 +7,7 @@ from functools import wraps
 from datetime import datetime
 from urllib.parse import urlencode
 from requests import Response, request
-from typing import Union,Callable,Any,List
+from typing import Union,Callable,Any,List,Dict
 from threading import Timer
 
 from .exceptions import NacosException, NacosClientException
@@ -473,9 +473,10 @@ class NacosInstance(NacosClient):
     >>> ns.delete('new.Service')
     True
     """
+    __thread_beats__: Dict[str, ThreadBeat]
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.__thread_beats__ = {}  # {(service,ip,port): Timer()}
+        self.__thread_beats__ = {}
 
     def register(self, service, ip, port,
                  name_space=None,weight=None,enabled=None,healthy=None,
@@ -632,6 +633,7 @@ class NacosInstance(NacosClient):
         if beat:
             s_beat = beat.json(separators=(',',':'),exclude={'metadata'})
             if s_beat in self.__thread_beats__.keys():
+                self.__thread_beats__[s_beat].stop()
                 self.__thread_beats__.pop(s_beat)
 
 
