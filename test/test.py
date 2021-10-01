@@ -1,9 +1,10 @@
 # coding=utf-8
-from source import  NacosConfig
+from source import  NacosConfig, ConfigBufferMode
 
 
 # 这个 Nacos 服务启用了 auth
-ncs = NacosConfig('localhost', 'nacos', 'nacos')
+ncs = NacosConfig('localhost', 'nacos', 'nacos',
+                  buffer_mode=ConfigBufferMode.storage)
 _data ="""# 测试数据
 keys:
     accessKey: <<accessKey>>
