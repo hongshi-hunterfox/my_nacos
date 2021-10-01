@@ -5,6 +5,9 @@ from source import NacosNameSpace,NacosService,NacosInstance,NacosConfig,\
 from typing import List,Callable
 
 
+CONST_NACOS_LOGON = ('10.126.8.80:8001', None, None)
+
+
 class TestNacosClient(object):
     """这个 Nacose 服务是无验证的
     使用了命名空间对配置和服务进行分组
@@ -20,21 +23,19 @@ class TestNacosClient(object):
         ]
     }
 
-    @property
-    def local_ips(self) ->List[str]:
-        addresses = socket.getaddrinfo(socket.gethostname(), None)
-        return list(filter(lambda _: ':' not in _,
-                           [item[4][0] for item in addresses]))
-
-    def __init__(self):
+    def __init__(self, logon=None):
+        if logon:
+            self.server_addr, self.user, self.pwd = logon
         self.nn = NacosNameSpace(self.server_addr, self.user, self.pwd)
         self.ns = NacosService(self.server_addr, self.user, self.pwd)
         self.ni = NacosInstance(self.server_addr, self.user, self.pwd)
         self.nc = NacosConfig(self.server_addr, self.user, self.pwd)
 
-    def show_local_ip(self):
-        print("本机IP地址:\n\t" + '\n\t'.join(self.local_ips))
-        print(f'连接到 Nacos Server: {self.server_addr}')
+    @property
+    def local_ips(self) ->List[str]:
+        addresses = socket.getaddrinfo(socket.gethostname(), None)
+        return list(filter(lambda _: ':' not in _,
+                           [item[4][0] for item in addresses]))
 
     def iter_instances(self,
                        filter_service: Callable=None,
@@ -49,15 +50,19 @@ class TestNacosClient(object):
                     continue
                 yield instance
 
+    def show_local_ip(self):
+        print("本机IP地址:\n\t" + '\n\t'.join(self.local_ips))
+        print(f'连接到 Nacos Server: {self.server_addr}')
+
     def show_switches(self):
         print('系统设置:')
         switches = self.ns.get_switches()
         for fld in switches.__fields__.keys():
             print(f'\t{fld}: {getattr(switches,fld)}')
 
-    def show_all_instance(self, func: Callable=None,):
+    def show_instance(self, func: Callable=None,):
         print('全部可用服务:')
-        for ins in t.iter_instances():
+        for ins in self.iter_instances():
             if func and not func(ins):
                 continue
             print(f'\t{ins.serviceName:>15} {ins.ip:}:{ins.port}')
@@ -77,14 +82,14 @@ class TestNacosClient(object):
         for data_id, paths in self.configs.items():
             print(f'\t{data_id}')
             for path in paths:
-                data = self.nc.get(data_id, path, tenant=self.tenant)
+                data = self.nc.get(data_id, tenant=self.tenant).value(path)
                 print(f'\t\t{path}: {data}')
 
 
-t = TestNacosClient()
+t = TestNacosClient(CONST_NACOS_LOGON)
 t.show_local_ip()  # 显示本机IP
 t.show_switches()  # 显示系统设置
-t.show_all_instance()  # 显示所有服务实例
+t.show_instance()  # 显示所有服务实例
 t.show_service_at_local()  # 显示本机启动的服务
 t.show_service_by_list()  # 显示指定的服务实例
 t.show_configs()  # 显示指定的配置项
