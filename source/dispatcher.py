@@ -8,7 +8,8 @@ from urllib.parse import urlencode
 from requests import Response, request
 from typing import Union,Callable,Any,List
 from threading import Timer
-from .models import Service,ServicesList,Switches,Metrics,Server,InstanceInfo,InstanceList,Beat,BeatInfo,NameSpace
+from .models import Service,ServicesList,Switches,Metrics,Server,InstanceInfo,\
+    InstanceList,Beat,BeatInfo,NameSpace
 
 
 DEFAULT_GROUP_NAME = 'DEFAULT_GROUP'
@@ -249,10 +250,12 @@ class NacosConfig(NacosClient):
                 continue
             setattr(instance, key, attrs.get(key))
 
-    def values(self, data_id, path, group=None, tenant=None, only_class=False):
+    def values(self, data_id, path, group=None, tenant=None,
+               only_class=False):
         """类装饰器
         被装饰的类中与指定配置的子项同名的属性将得到相应的值
-        only_class: 为 True 时,对象的__init__/__call__方法也将被装饰,这使实例属性也被赋值
+        only_class: 为 True 时,对象的__init__/__call__方法也将被装饰,
+            当创建新实例或调用实例时,实例属性与类属性将被更新
         """
         def class_wrapper(_class):
             """读取配置值作为类的属性"""
