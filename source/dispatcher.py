@@ -9,13 +9,11 @@ from urllib.parse import urlencode
 from requests import Response, request
 from typing import Union,Callable,Any,List
 from threading import Timer
+
+from .exceptions import NacosException, NacosClientException
 from .consts import DEFAULT_GROUP_NAME
 from .models import Service, ServicesList, Switches, Metrics, Server, InstanceInfo, \
-    InstanceList, Beat, BeatInfo, NameSpace, InstanceItem
-
-
-class NacosException(BaseException): pass
-class NacosClientException(BaseException): pass
+    InstanceList, Beat, BeatInfo, NameSpace, InstanceItem, ConfigData
 
 
 class Token(object):
@@ -118,9 +116,9 @@ class NacosClient(object):
 class NacosConfig(NacosClient):
     """配置
     >>> nc = NacosConfig('localhost', 'nacos', 'nacos')
-    >>> nc.get('test_yaml', 'spring.datasource.dynamic.enabled')
+    >>> nc.get('test_yaml').value('spring.datasource.dynamic.enabled')
     False
-    >>> nc.get('test_json', 'keys.secretKey')
+    >>> nc.get('test_json').value('keys.secretKey')
     'iGNddHce42LNtOc0sc58p94ayRxZNR'
     >>> data = {"serviceName":"ces-ois","healthyOnly":True,"namespaceId":"dev","groupName":"DEFAULT_GROUP"}
     >>> nc.post('test_update',data,data_type='JSON')
@@ -146,13 +144,17 @@ class NacosConfig(NacosClient):
         #   get时优先读取缓存，缓存未命中添加相应监听
         self.config_buffer = {}  # {dataid^group^tenant, md5, obj}
 
-    @staticmethod
-    def _paras(source_type, source_data) -> dict:
-        """将配置数据按格式转码为dict"""
-        if source_type == 'yaml':
-            return yaml.load(source_data, Loader=yaml.SafeLoader)
-        elif source_type == 'json':
-            return json.loads(source_data)
+    @classmethod
+    def _paras(cls, rsp: Response, path=None) -> ConfigData:
+        """从 Response 生产 ConfigData"""
+        config = ConfigData(config_type=rsp.headers['config-type'],
+                            config_md5=rsp.headers['content-md5'],
+                            data=rsp.text)
+        if config.config_type == 'yaml':
+            config.data = yaml.load(config.data, Loader=yaml.SafeLoader)
+        elif config.config_type == 'json':
+            config.data = json.loads(config.data)
+        return config
 
     def listener(self, data_id, group=None, tenant=None):
         """监听配置
@@ -164,18 +166,12 @@ class NacosConfig(NacosClient):
         """
         raise NacosException('此功能尚未实现')
 
-    def get(self, data_id, path, group=None, tenant=None) -> Any:
+    def get(self, data_id, group=None, tenant=None) -> ConfigData:
         """取配置值"""
         api = '/nacos/v1/cs/configs'
         params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
         rsp = self._get_response(api, params)
-        cfg = self._paras(rsp.headers['config-type'], rsp.text)
-        try:
-            for key in path.split('.'):
-                cfg = cfg[key]
-            return cfg
-        except (BaseException,) as err:
-            raise NacosException(err)
+        return self._paras(rsp)
 
     def post(self, data_id, data, group=None, tenant=None, data_type=None
              ) -> bool:
@@ -230,7 +226,7 @@ class NacosConfig(NacosClient):
             @wraps(func)
             def call_func(*args, **kwargs):
                 try:
-                    e_return = self.get(data_id, path, group, tenant)
+                    e_return = self.get(data_id, group, tenant).value(path)
                 except (NacosException,):
                     e_return = func(*args, **kwargs)
                 return e_return
@@ -238,17 +234,17 @@ class NacosConfig(NacosClient):
         return func_wrapper
 
     @staticmethod
-    def _fetch_attrs(instance:object, attrs:dict):
+    def _fetch_attrs(instance:object, data:dict):
         """为对象实例填充属性"""
         _class = instance.__class__
-        for key in attrs.keys():
+        for key in data.keys():
             if key.startswith('__') and key.endswith('__'):
                 continue
             if key in instance.__dict__.keys() and instance.__dict__[key] is Callable:
                 continue
             if key in _class.__dict__.keys() and _class.__dict__[key] is Callable:
                 continue
-            setattr(instance, key, attrs.get(key))
+            setattr(instance, key, data.get(key))
 
     def values(self, data_id, path, group=None, tenant=None,
                only_class=False):
@@ -263,20 +259,20 @@ class NacosConfig(NacosClient):
                 @wraps(func)
                 def call_func(*args, **kwargs):
                     func(*args, **kwargs)
-                    data = self.get(data_id, path, group, tenant)
+                    data = self.get(data_id, group, tenant).value(path)
                     NacosConfig._fetch_attrs(args[0], data)
                 return call_func
 
             def wrap_class_call(func):
                 @wraps(func)
                 def call_func(*args, **kwargs):
-                    data = self.get(data_id, path, group, tenant)
+                    data = self.get(data_id, group, tenant).value(path)
                     NacosConfig._fetch_attrs(args[0], data)
                     return func(*args, **kwargs)
                 return call_func
 
             try:
-                cfg = self.get(data_id, path, group, tenant)
+                cfg = self.get(data_id, group, tenant).value(path)
                 for key in cfg.keys():
                     if not key.startswith('__') and \
                             not key.endswith('__') and \

@@ -1,6 +1,23 @@
 # coding=utf-8
 from pydantic import BaseModel
 from typing import Optional,List,Any
+from .exceptions import NacosClientException
+
+
+class ConfigData(BaseModel):
+    config_type: str
+    config_md5: str
+    data: Any
+
+    def value(self, path: str):
+        path = path if path else ''
+        data = self.data
+        try:
+            for key in path.split('.'):
+                data = data[key]
+        except (BaseException,) as err:
+            raise NacosClientException(err)
+        return data
 
 
 class ServicesList(BaseModel):
