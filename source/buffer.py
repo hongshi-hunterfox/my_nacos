@@ -26,15 +26,23 @@ class IConfigBuffer(metaclass=ABCMeta):
         super().__init__()
 
     @staticmethod
-    def get_listening(data_id:str, group=None, tenant=None, md5=None)->str:
+    def get_listening(data_id:str, group=None, tenant=None, md5=None,
+                      safe=True)->str:
+        """返回配置对应的监听数据报文
+        safe: 如果为 True 则返回值中 chr(1)、chr(2) 替换为^1、^2
+        """
         lst = [data_id,
                group if group else DEFAULT_GROUP_NAME,
-               md5 if md5 else '',
-               tenant if tenant else '']
-        return chr(2).join(lst)
+               md5 if md5 else '']
+        if tenant: lst.append(tenant)
+        s = ('^2'if safe else chr(2)).join(lst)
+        return s + ('^1'if safe else chr(1))
 
-    def listenings(self, data_id:str=None, group=None, tenant=None)->str:
-        """返回匹配条件的缓冲对应的监听报文"""
+    def listenings(self, data_id:str=None, group=None, tenant=None,
+                   safe=True)->str:
+        """返回匹配条件的缓冲对应的监听报文
+        safe: 如果为 True 则返回值中 chr(1)、chr(2) 替换为^1、^2
+        """
         lst = []
         for k,v in self.buffer.items():
             _ = k.split(chr(2))
@@ -43,8 +51,9 @@ class IConfigBuffer(metaclass=ABCMeta):
                     (tenant and tenant!=_[2]):
                 continue
             _[2] = v.config.config_md5
-            lst.append(chr(2).join(_))
-        return chr(1).join(lst)
+            lst.append(self.get_listening(*_, safe=safe))
+        return ''.join(lst)
+
 
     @abstractmethod
     def get_content_md5(self, data_id:str, group=None, tenant=None)->str:
@@ -87,6 +96,8 @@ class BufferMemory(IConfigBuffer):
         """更新缓存"""
         assert config, '必需给出有效的配置数据'
         listening = self.get_listening(data_id, group, tenant)
+        if listening not in self.buffer.keys():
+            self.buffer[listening] = BufferItem()
         self.buffer[listening].update_time = datetime.now()
         self.buffer[listening].config = config
 
