@@ -2,7 +2,7 @@
 from datetime import datetime
 import uvicorn
 from fastapi import FastAPI
-from source import NacosInstance,Beat
+from source import NacosInstance,NacosConfig,Beat
 
 
 def s_time_now():
@@ -12,6 +12,7 @@ def s_time_now():
 app = FastAPI(title='NacosInstance.beating Test',
               description='Test method "beating_start" for class "NacosInstance"')
 ni = NacosInstance('localhost', 'nacos', 'nacos')
+nc = NacosConfig('localhost', 'nacos', 'nacos')
 beat = Beat(serviceName='test-beat', ip='127.0.0.1', port=7333,
             metadata={'starttime': s_time_now(), 'lasttime': s_time_now})
 
@@ -36,8 +37,13 @@ def down():
     ni.beating_stop(beat)
     return 'ok'
 
+@app.router.get('/testjson')
+def testjson():
+    return nc.get('test_json').data
+
 
 ni.beating_start(beat)
+nc.listening('test_json')
 uvicorn.run(app = app,
             host = '127.0.0.1',
             port = 7333,
