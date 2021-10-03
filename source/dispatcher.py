@@ -5,16 +5,17 @@ from copy import deepcopy
 from random import randint
 from functools import wraps
 from datetime import datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode,unquote
 from requests import Response, request
 from typing import Union,Callable,Any,List,Dict
-from threading import Timer
 
 from .buffer import new_buffer
+from .threads import ThreadBeat, ConfigListener
 from .exceptions import NacosException, NacosClientException
 from .consts import DEFAULT_GROUP_NAME, ConfigBufferMode
-from .models import Service, ServicesList, Switches, Metrics, Server, InstanceInfo, \
-    InstanceList, Beat, BeatInfo, NameSpace, InstanceItem, ConfigData
+from .models import Service, ServicesList, Switches, Metrics, Server, \
+    InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, InstanceItem, \
+    ConfigData
 
 
 class Token(object):
@@ -47,7 +48,7 @@ class Token(object):
 
 
 class NacosClient(object):
-    """API封装"""
+    """API封装基础类"""
     @staticmethod
     def _parse_server_addr(url: str) -> str:
         """为服务地址补全协议头、端口"""
@@ -60,7 +61,7 @@ class NacosClient(object):
         return url
 
     @staticmethod
-    def _kwargs2dict(**kwargs) -> dict:
+    def params(**kwargs) -> dict:
         """将所有命名参数整合为一个字典,排除值为None的"""
         d_result = {}
         for k,v in kwargs.items():
@@ -76,6 +77,19 @@ class NacosClient(object):
             return json.loads(res.text)
         else:  # 'text' in res.headers['content-type']:
             return res.text
+
+    @staticmethod
+    def _def_headers(headers=None):
+        if headers is None:
+            headers = {}
+        has_content_type = False
+        for key in headers.keys():
+            if key.title() == 'Content-Type':
+                has_content_type = True
+                break
+        if not has_content_type:
+            headers['Content-Type'] = 'application/x-www-form-urlencoded'
+        return headers
 
     def __init__(self, server: str, user:str=None,pwd:str=None):
         self.server = self._parse_server_addr(server)
@@ -96,12 +110,13 @@ class NacosClient(object):
             url = url + '?' + urlencode(params)
         return url
 
-    def _get_response(self,path:str, params:dict=None, method:str='GET'
-                      ) -> Response:
+    def request(self, path:str, params:dict=None,
+                method:str='GET',headers=None
+                ) -> Response:
         """各种请求方式实现"""
         assert method in['POST', 'GET','PUT','DELETE'],\
             NacosClientException('不支持的请求方法')
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        headers = self._def_headers(headers)
         data = None
         if method == 'POST':
             url = self._get_full_path(self.server, path)
@@ -142,13 +157,12 @@ class NacosConfig(NacosClient):
                  buffer_mode:ConfigBufferMode = ConfigBufferMode.nothing,
                  **kwargs):
         super().__init__(*args, **kwargs)
-        self.__buffer = None
-        if buffer_mode is None:
-            buffer_mode = buffer_mode!=ConfigBufferMode.nothing
-        if buffer_mode!=ConfigBufferMode.nothing:
+        self.buffer = None
+        if buffer_mode and buffer_mode!=ConfigBufferMode.nothing:
             pattern = re.compile(r'http[s]?://([\w.]+):(\d+).*')
             ip, port = pattern.search(self.server).groups()
-            self.__buffer = new_buffer(buffer_mode, ip, eval(port))
+            self.buffer = new_buffer(buffer_mode, ip, eval(port))
+        self.listen_thread = ConfigListener(self.listener)
 
     @classmethod
     def _paras(cls, rsp: Response) -> ConfigData:
@@ -158,27 +172,48 @@ class NacosConfig(NacosClient):
                             data=rsp.text)
         return config
 
-    def listener(self, data_id, group=None, tenant=None):
-        """监听配置
-        这需要建立一个线程池来管理:
-            每个data_id对应一个异步请求
-            建立迅步请求并等待回复
-            得到回复后更新config_buffer并重建请求
-            线程池销毁时要清理所有异步请求
-        """
-        raise NacosException('此功能尚未实现')
+    def set_buffer(self, data_id, group, tenant, config):
+        try:
+            self.buffer.set(config, data_id, group, tenant)
+        except (BaseException,):
+            pass
+
+    def listening(self, data_id, group=None, tenant=None):
+        """添加自动监听配置项"""
+        self.listen_thread.add(data_id, group, tenant)
+
+    def listener(self, listening):
+        """监听配置"""
+        api = '/nacos/v1/cs/configs/listener'
+        params = {'Listening-Configs': listening}
+        headers = {'Long-Pulling-Timeout': '30000'}
+        rsp = self.request(api, params, method='POST', headers=headers)
+        if rsp.text == '':
+            return  # 配置未发生变更
+        data = unquote(rsp.text).replace('\n','')
+        # 逐个配置更新
+        for listen in data[:-1].split(chr(1)):
+            params = listen.split(chr(2))
+            params[1] = None if params[1]==DEFAULT_GROUP_NAME else params[1]
+            try:
+                self.buffer.delete(params)
+            except (BaseException,):
+                pass
+            self.get(*params)
 
     def get(self, data_id, group=None, tenant=None) -> ConfigData:
         """取配置值"""
-        if self.__buffer:
-            config = self.__buffer.get(data_id, group, tenant)
-        else:
+        try:
+            config = self.buffer.get(data_id, group, tenant)
+        except (BaseException,):
+            config = None
+        if config is None:
             api = '/nacos/v1/cs/configs'
-            params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
-            rsp = self._get_response(api, params)
+            params = self.params(dataId=data_id, group=group, tenant=tenant)
+            rsp = self.request(api, params)
             config = self._paras(rsp)
-            if self.__buffer and config:
-                self.__buffer.set(config, data_id, group, tenant)
+            self.listen_thread.update(data_id, group, tenant, config.config_md5)
+            self.set_buffer(data_id, group, tenant, config)
         return config
 
     def post(self, data_id, data, group=None, tenant=None, data_type=None
@@ -186,25 +221,29 @@ class NacosConfig(NacosClient):
         """发布配置
         发布配置时,data_id必需是已存在于Nacos服务中的"""
         api = '/nacos/v1/cs/configs'
-        params = self._kwargs2dict(dataId=data_id, content=data, group=group,
-                                   tenant=tenant,type=data_type)
-        rsp = self._get_response(api, params, method='POST')
+        params = self.params(dataId=data_id, content=data, group=group,
+                             tenant=tenant,type=data_type)
+        rsp = self.request(api, params, method='POST')
         success = self._paras_body(rsp)
-        if success and self.__buffer:
+        if success:
+            md5 = hashlib.md5(data.encode()).hexdigest()
             config = ConfigData(config_type=data_type,
-                                config_md5=hashlib.md5(data.encode()).hexdigest(),
+                                config_md5=md5,
                                 data=data)
-            self.__buffer.set(config, data_id, group, tenant)
+            self.set_buffer(data_id, group, tenant, config)
         return success
 
     def delete(self, data_id, group=None, tenant=None) -> bool:
         """删除配置"""
         api = '/nacos/v1/cs/configs'
-        params = self._kwargs2dict(dataId=data_id, group=group, tenant=tenant)
-        rsp = self._get_response(api, params, method='DELETE')
+        params = self.params(dataId=data_id, group=group, tenant=tenant)
+        rsp = self.request(api, params, method='DELETE')
         success = self._paras_body(rsp)
-        if success and self.__buffer:
-            self.__buffer.delete(data_id, group, tenant)
+        if success:
+            try:
+                self.buffer.delete(data_id, group, tenant)
+            except (BaseException,):
+                pass
         return success
 
     def history(self, data_id,
@@ -213,15 +252,14 @@ class NacosConfig(NacosClient):
         """查询配置历史"""
         api = '/nacos/v1/cs/history'
         if nid is None:
-            params = self._kwargs2dict(search='accurate',
-                                       dataId=data_id, group=group,
-                                       tenant=tenant,
-                                       pageNo=page_no, pageSize=page_size)
+            params = self.params(search='accurate',
+                                 dataId=data_id, group=group,
+                                 tenant=tenant,
+                                 pageNo=page_no, pageSize=page_size)
         else:
-            params = self._kwargs2dict(dataId=data_id, group=group,
-                                       tenant=tenant,
-                                       nid=nid)
-        rsp = self._get_response(api, params)
+            params = self.params(dataId=data_id, group=group,
+                                 tenant=tenant, nid=nid)
+        rsp = self.request(api, params)
         return self._paras_body(rsp)
 
     def previous(self,  nid, data_id, group=None, tenant=None):
@@ -230,9 +268,9 @@ class NacosConfig(NacosClient):
         """
         raise NacosException('此功能尚未实现')
         # api = '/nacos/v1/cs/history/previous'
-        # params = self._kwargs2dict(id=nid,
-        #                            dataId=data_id, group=group, tenant=tenant)
-        # rsp = self._get_response(api, params)
+        # params = self.params(id=nid, dataId=data_id,
+        #                      group=group, tenant=tenant)
+        # rsp = self.request(api, params)
         # return self._paras_body(rsp)
 
     def value(self, data_id, path, group=None, tenant=None):
@@ -257,9 +295,11 @@ class NacosConfig(NacosClient):
         for key in data.keys():
             if key.startswith('__') and key.endswith('__'):
                 continue
-            if key in instance.__dict__.keys() and instance.__dict__[key] is Callable:
+            if key in instance.__dict__.keys() and \
+                    instance.__dict__[key] is Callable:
                 continue
-            if key in _class.__dict__.keys() and _class.__dict__[key] is Callable:
+            if key in _class.__dict__.keys() and \
+                    _class.__dict__[key] is Callable:
                 continue
             setattr(instance, key, data.get(key))
 
@@ -330,9 +370,6 @@ class NacosService(NacosClient):
     >>> type(ns.servers())
     <class 'list'>
     """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     def create(self, service,
                group=None, name_space=None, protect_threshold=None,
                metadata=None, selector=None
@@ -343,23 +380,23 @@ class NacosService(NacosClient):
             metadata = json.dumps(metadata)
         if selector and not isinstance(selector, str):
             selector = json.dumps(selector)
-        params = self._kwargs2dict(serviceName=service,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   protectThreshold=protect_threshold,
-                                   metadata=metadata,
-                                   selector=selector)
-        rsp = self._get_response(api, params, 'POST')
+        params = self.params(serviceName=service,
+                             groupName=group,
+                             namespaceId=name_space,
+                             protectThreshold=protect_threshold,
+                             metadata=metadata,
+                             selector=selector)
+        rsp = self.request(api, params, method='POST')
         return self._paras_body(rsp) == 'ok'
 
     def query(self, service, group=None, name_space=None) -> Service:
         """查询服务
         不能以该接口是否返回值来判断服务是否存在"""
         api = '/nacos/v1/ns/service'
-        params = self._kwargs2dict(serviceName=service,
-                                   groupName=group,
-                                   namespaceId=name_space)
-        rsp = self._get_response(api, params)
+        params = self.params(serviceName=service,
+                             groupName=group,
+                             namespaceId=name_space)
+        rsp = self.request(api, params)
         return Service(**self._paras_body(rsp))
 
     def update(self, service, protect_threshold:float,
@@ -371,98 +408,70 @@ class NacosService(NacosClient):
             metadata = json.dumps(metadata)
         if selector and not isinstance(selector, str):
             selector = json.dumps(selector)
-        params = self._kwargs2dict(serviceName=service,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   protectThreshold=protect_threshold,
-                                   metadata=metadata,
-                                   selector=selector)
-        rsp = self._get_response(api, params, 'PUT')
+        params = self.params(serviceName=service,
+                             groupName=group,
+                             namespaceId=name_space,
+                             protectThreshold=protect_threshold,
+                             metadata=metadata,
+                             selector=selector)
+        rsp = self.request(api, params, method='PUT')
         return self._paras_body(rsp) == 'ok'
 
     def delete(self, service, group=None, name_space=None) -> bool:
         """删除服务"""
         api = '/nacos/v1/ns/service'
-        params = self._kwargs2dict(serviceName=service,
-                                   groupName=group,
-                                   namespaceId=name_space)
-        rsp = self._get_response(api, params, 'DELETE')
+        params = self.params(serviceName=service,
+                             groupName=group,
+                             namespaceId=name_space)
+        rsp = self.request(api, params, method='DELETE')
         return self._paras_body(rsp) == 'ok'
 
     def list(self, page_no:int=1, page_size:int=10,
              group=None, name_space=None) -> ServicesList:
         """服务列表"""
         api = '/nacos/v1/ns/service/list'
-        params = self._kwargs2dict(pageNo=page_no,
-                                   pageSize=page_size,
-                                   groupName=group,
-                                   namespaceId=name_space)
-        rsp = self._get_response(api, params)
+        params = self.params(pageNo=page_no,
+                             pageSize=page_size,
+                             groupName=group,
+                             namespaceId=name_space)
+        rsp = self.request(api, params)
         return ServicesList(**self._paras_body(rsp))
 
     def get_switches(self) -> Switches:
         """获取系统开关状态"""
         api = '/nacos/v1/ns/operator/switches'
-        rsp = self._get_response(api)
+        rsp = self.request(api)
         return Switches(**self._paras_body(rsp))
 
     def set_switches(self, entry, value, debug=False
                  ) -> Union[bool, Switches]:
         """设置系统开关"""
         api = '/nacos/v1/ns/operator/switches'
-        params = self._kwargs2dict(entry=entry,
-                                   value=value,
-                                   debug=debug)
-        rsp = self._get_response(api, params, 'PUT')
+        params = self.params(entry=entry,
+                             value=value,
+                             debug=debug)
+        rsp = self.request(api, params, method='PUT')
         return self._paras_body(rsp) == 'ok'
 
     def metrics(self) ->Metrics:
         """当前数据指标"""
         api = '/nacos/v1/ns/operator/metrics'
-        rsp = self._get_response(api)
+        rsp = self.request(api)
         return Metrics(**self._paras_body(rsp))
 
     def servers(self, healthy:bool=None)-> List[Server]:
         """集群Server列表"""
         api = '/nacos/v1/ns/operator/servers'
-        params = self._kwargs2dict(healthy=healthy)
-        rsp = self._get_response(api, params)
+        params = self.params(healthy=healthy)
+        rsp = self.request(api, params)
         return [Server(**item) for item in self._paras_body(rsp)['servers']]
 
     def leader(self):
         """当前集群的leader"""
         raise NacosException('此协议已失效')
         # api = '/nacos/v1/ns/raft/leader'
-        # rsp = self._get_response(api)
+        # rsp = self.request(api)
         # return self._paras_body(rsp)
-
-
-class ThreadBeat(object):
-    def __init__(self, nc, beat):
-        self.nc = nc
-        self.beat = beat
-        self.__thread = None
-        self.start()
-
-    def start(self):
-        if self.__thread is None:
-            self.__loop_beat__()
-
-    def __loop_beat__(self):
-        if self.nc:
-            beat_info = self.nc.beating(beat=self.beat)
-            interval = float(beat_info.clientBeatInterval / 1000)
-            self.__thread = Timer(interval, self.__loop_beat__)
-            self.__thread.start()
-
-    def stop(self):
-        if self.__thread:
-            self.__thread.cancel()
-            self.__thread = None
-
-    def __del__(self):
-        if self.__thread:
-            self.stop()
 
 
 class NacosInstance(NacosClient):
@@ -490,10 +499,10 @@ class NacosInstance(NacosClient):
     >>> ns.delete('new.Service')
     True
     """
-    __thread_beats__: Dict[str, ThreadBeat]
+    beat_threads: Dict[str, ThreadBeat]
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.__thread_beats__ = {}
+        self.beat_threads = {}
 
     def register(self, service, ip, port,
                  name_space=None,weight=None,enabled=None,healthy=None,
@@ -503,16 +512,16 @@ class NacosInstance(NacosClient):
         api = '/nacos/v1/ns/instance'
         if metadata and not isinstance(metadata,str):
             metadata = json.dumps(metadata)
-        params = self._kwargs2dict(serviceName=service, ip=ip, port=port,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   weight=weight,
-                                   enabled=enabled,
-                                   healthy=healthy,
-                                   metadata=metadata,
-                                   clusterName=cluster,
-                                   ephemeral=ephemeral)
-        rsp = self._get_response(api, params, 'POST')
+        params = self.params(serviceName=service, ip=ip, port=port,
+                             groupName=group,
+                             namespaceId=name_space,
+                             weight=weight,
+                             enabled=enabled,
+                             healthy=healthy,
+                             metadata=metadata,
+                             clusterName=cluster,
+                             ephemeral=ephemeral)
+        rsp = self.request(api, params, method='POST')
         return self._paras_body(rsp) == 'ok'
 
     def delete(self, service, ip, port,
@@ -520,12 +529,12 @@ class NacosInstance(NacosClient):
                )->bool:
         """删除实例"""
         api = '/nacos/v1/ns/instance'
-        params = self._kwargs2dict(serviceName=service, ip=ip, port=port,
-                                   groupName=group,
-                                   clusterName=cluster,
-                                   namespaceId=name_space,
-                                   ephemeral=ephemeral)
-        rsp = self._get_response(api, params, 'DELETE')
+        params = self.params(serviceName=service, ip=ip, port=port,
+                             groupName=group,
+                             clusterName=cluster,
+                             namespaceId=name_space,
+                             ephemeral=ephemeral)
+        rsp = self.request(api, params, method='DELETE')
         return self._paras_body(rsp) == 'ok'
 
     def update(self, service, ip, port,
@@ -535,15 +544,15 @@ class NacosInstance(NacosClient):
         api = '/nacos/v1/ns/instance'
         if metadata and not isinstance(metadata,str):
             metadata = json.dumps(metadata)
-        params = self._kwargs2dict(serviceName=service, ip=ip, port=port,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   weight=weight,
-                                   enabled=enabled,
-                                   metadata=metadata,
-                                   clusterName=cluster,
-                                   ephemeral=ephemeral)
-        rsp = self._get_response(api, params, 'PUT')
+        params = self.params(serviceName=service, ip=ip, port=port,
+                             groupName=group,
+                             namespaceId=name_space,
+                             weight=weight,
+                             enabled=enabled,
+                             metadata=metadata,
+                             clusterName=cluster,
+                             ephemeral=ephemeral)
+        rsp = self.request(api, params, method='PUT')
         return self._paras_body(rsp) == 'ok'
 
     def query(self, service, ip, port,
@@ -551,13 +560,13 @@ class NacosInstance(NacosClient):
               healthy_only=False, ephemeral=None) ->InstanceInfo:
         """获取实例信息"""
         api = '/nacos/v1/ns/instance'
-        params = self._kwargs2dict(serviceName=service, ip=ip, port=port,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   clusterName=cluster,
-                                   healthyOnly=healthy_only,
-                                   ephemeral=ephemeral)
-        rsp = self._get_response(api, params)
+        params = self.params(serviceName=service, ip=ip, port=port,
+                             groupName=group,
+                             namespaceId=name_space,
+                             clusterName=cluster,
+                             healthyOnly=healthy_only,
+                             ephemeral=ephemeral)
+        rsp = self.request(api, params)
         return InstanceInfo(**self._paras_body(rsp))
 
     def list(self, service,
@@ -565,12 +574,12 @@ class NacosInstance(NacosClient):
              )->InstanceList:
         """查询实例列表"""
         api = '/nacos/v1/ns/instance/list'
-        params = self._kwargs2dict(serviceName=service,
-                                   groupName=group,
-                                   namespaceId=name_space,
-                                   clusters=cluster,
-                                   healthyOnly=healthy_only)
-        rsp = self._get_response(api, params)
+        params = self.params(serviceName=service,
+                             groupName=group,
+                             namespaceId=name_space,
+                             clusters=cluster,
+                             healthyOnly=healthy_only)
+        rsp = self.request(api, params)
         return InstanceList(**self._paras_body(rsp))
 
     def select_one(self, service, cluster=None)->InstanceItem:
@@ -616,15 +625,14 @@ class NacosInstance(NacosClient):
                              weight=weight, metadata=metadata, beat=beat)
         new_beat = deepcopy(beat)
         self.calc_item(new_beat.metadata)
-        print(f'NacosInstance.beating:{new_beat}')
         if service is None:
             service = beat.serviceName.split('@')[-1]
         group = group if group else DEFAULT_GROUP_NAME
-        params = self._kwargs2dict(serviceName=service,
-                                   beat=new_beat.json(separators=(',',':')),
-                                   groupName=group,
-                                   ephemeral=ephemeral)
-        rsp = self._get_response(api, params, 'PUT')
+        params = self.params(serviceName=service,
+                             beat=new_beat.json(separators=(',',':')),
+                             groupName=group,
+                             ephemeral=ephemeral)
+        rsp = self.request(api, params, method='PUT')
         return BeatInfo(**self._paras_body(rsp))
 
     def beating_start(self, beat: Beat):
@@ -640,18 +648,18 @@ class NacosInstance(NacosClient):
                 raise NacosException('开始自动心跳失败')
         """
         if beat:
-            s_beat = beat.json(separators=(',',':'),exclude={'metadata'})
-            if s_beat not in self.__thread_beats__.keys():
-                self.__thread_beats__[s_beat] = ThreadBeat(self, beat)
+            s_beat = str(beat)
+            if s_beat not in self.beat_threads.keys():
+                self.beat_threads[s_beat] = ThreadBeat(self.beating,0,beat)
 
     def beating_stop(self, beat:Beat):
         """停止自动心跳
         """
         if beat:
-            s_beat = beat.json(separators=(',',':'),exclude={'metadata'})
-            if s_beat in self.__thread_beats__.keys():
-                self.__thread_beats__[s_beat].stop()
-                self.__thread_beats__.pop(s_beat)
+            s_beat = str(beat)
+            if s_beat in self.beat_threads.keys():
+                self.beat_threads[s_beat].stop()
+                self.beat_threads.pop(s_beat)
 
 
 class NacosNameSpace(NacosClient):
@@ -669,35 +677,33 @@ class NacosNameSpace(NacosClient):
     True
     """
     api = '/nacos/v1/console/namespaces'
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
     def query(self) -> List[NameSpace]:
         """查询命名空间"""
-        rsp = self._get_response(self.api)
+        rsp = self.request(self.api)
         result = self._paras_body(rsp)
         if result['code'] != 200:
             raise NacosException(result['message'])
         return [NameSpace(**item) for item in result['data']]
 
     def create(self, name_space:str, show_name: str, desc: str=None)->bool:
-        paras = self._kwargs2dict(customNamespaceId=name_space,
-                                  namespaceName=show_name,
-                                  namespaceDesc=desc)
-        rsp = self._get_response(self.api, paras, 'POST')
+        paras = self.params(customNamespaceId=name_space,
+                            namespaceName=show_name,
+                            namespaceDesc=desc)
+        rsp = self.request(self.api, paras, method='POST')
         return self._paras_body(rsp)
 
     def update(self, name_space:str, show_name: str, desc: str)->bool:
         """修改命名空间"""
-        paras = self._kwargs2dict(namespace=name_space,
-                                  namespaceShowName=show_name,
-                                  namespaceDesc=desc)
-        rsp = self._get_response(self.api, paras, 'PUT')
+        paras = self.params(namespace=name_space,
+                            namespaceShowName=show_name,
+                            namespaceDesc=desc)
+        rsp = self.request(self.api, paras, method='PUT')
         return self._paras_body(rsp)
 
     def delete(self, name_space:str)->bool:
-        paras = self._kwargs2dict(namespaceId=name_space)
-        rsp = self._get_response(self.api, paras, 'DELETE')
+        paras = self.params(namespaceId=name_space)
+        rsp = self.request(self.api, paras, method='DELETE')
         return self._paras_body(rsp)
 
 
@@ -706,3 +712,4 @@ if __name__ == '__main__':
     import doctest
     doctest.testmod(optionflags=doctest.ELLIPSIS)
 '''
+

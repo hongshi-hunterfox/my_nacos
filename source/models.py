@@ -161,6 +161,9 @@ class Beat(BaseModel):
     metadata: dict = {}
     weight: int = 1
 
+    def __str__(self):
+        return self.json(separators=(',',':'), exclude={'metadata'})
+
 
 class BeatInfo(BaseModel):
     clientBeatInterval: int

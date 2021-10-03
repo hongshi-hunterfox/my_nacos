@@ -1,5 +1,5 @@
 # coding=utf-8
-from enum import Enum,auto
+from enum import Enum
 
 
 # 默认分组名

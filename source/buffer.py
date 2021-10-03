@@ -26,8 +26,7 @@ class IConfigBuffer(metaclass=ABCMeta):
         super().__init__()
 
     @staticmethod
-    def get_listening(data_id:str, group=None, tenant=None, md5=None,
-                      safe=True)->str:
+    def get_listening(data_id:str, group=None, tenant=None, md5=None)->str:
         """返回配置对应的监听数据报文
         safe: 如果为 True 则返回值中 chr(1)、chr(2) 替换为^1、^2
         """
@@ -35,25 +34,8 @@ class IConfigBuffer(metaclass=ABCMeta):
                group if group else DEFAULT_GROUP_NAME,
                md5 if md5 else '']
         if tenant: lst.append(tenant)
-        s = ('^2'if safe else chr(2)).join(lst)
-        return s + ('^1'if safe else chr(1))
-
-    def listenings(self, data_id:str=None, group=None, tenant=None,
-                   safe=True)->str:
-        """返回匹配条件的缓冲对应的监听报文
-        safe: 如果为 True 则返回值中 chr(1)、chr(2) 替换为^1、^2
-        """
-        lst = []
-        for k,v in self.buffer.items():
-            _ = k.split(chr(2))
-            if (data_id and data_id!=_[2]) and \
-                    (group and group!=_[2]) and \
-                    (tenant and tenant!=_[2]):
-                continue
-            _[2] = v.config.config_md5
-            lst.append(self.get_listening(*_, safe=safe))
-        return ''.join(lst)
-
+        s = chr(2).join(lst)
+        return s + chr(1)
 
     @abstractmethod
     def get_content_md5(self, data_id:str, group=None, tenant=None)->str:
@@ -198,7 +180,6 @@ class BufferStorage(IConfigBuffer):
                 raise NacosClientException('can not making dir(it is file)', path)
             os.makedirs(path)
         with open(full_path, 'w+', encoding='utf-8') as f:
-            print(f'----write file: {full_path}')
             f.write(config.data)
         item = BufferItem()
         item.config = ConfigData(config_type=config.config_type,
@@ -218,3 +199,5 @@ def new_buffer(buffer_mode:ConfigBufferMode,
         return BufferMemory(*args, **kwargs)
     elif buffer_mode==ConfigBufferMode.storage:
         return BufferStorage(*args, **kwargs)
+    else:
+        return None
