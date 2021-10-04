@@ -43,7 +43,6 @@ class ThreadBeat(Thread):
     """
     def loop(self):
         if callable(self.executor):
-            print('ThreadBeat.loop')
             beat_info = self.executor(*self.args)
             interval = float(beat_info.clientBeatInterval / 1000)
             self.thread = Timer(interval, self.loop)
@@ -83,7 +82,6 @@ class ConfigListener(Thread):
 
     def loop(self):
         if callable(self.executor) and self.listening:
-            print('ConfigListener.loop')
             self.executor(self.listening)
             self.thread = Timer(self.interval, self.loop)
             self.thread.start()
