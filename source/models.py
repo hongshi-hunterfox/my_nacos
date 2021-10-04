@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import yaml, json
+import yaml, json, re
 from pydantic import BaseModel
 from typing import Optional,List,Any
 from .exceptions import NacosClientException
@@ -25,11 +25,17 @@ class ConfigData(BaseModel):
             return self.data
 
     def value(self, path: str):
+        re_idx = re.compile(r'(.+)\[(\d+)\]')
         path = path if path else ''
         data = self.data_obj
         try:
             for key in path.split('.'):
-                data = data[key]
+                key_idx = re_idx.match(key)
+                if key_idx:
+                    key,idx = key_idx.groups()
+                    data = data[key][eval(idx)]
+                else:
+                    data = data[key]
         except (BaseException,) as err:
             raise NacosClientException(err)
         return data
