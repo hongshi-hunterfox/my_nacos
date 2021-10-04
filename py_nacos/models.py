@@ -147,6 +147,10 @@ class InstanceItem(BaseModel):
     ipDeleteTimeout: Optional[int]
     instanceHeartBeatTimeOut: Optional[int]
 
+    @property
+    def host(self):
+        return f'{self.ip}:{self.port}'
+
 
 class InstanceList(BaseModel):
     name: str

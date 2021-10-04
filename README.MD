@@ -38,13 +38,14 @@ ncs = NacosConfig('localhost')
 * `NacosInstance` 提供服务实例注册功能，同时，简化服务心跳处理，提供了`beating_start`和`beating_stop`
 * 一个`NacosInstance`实例同时最多维持一个自动心跳,当停止一个自动心跳后,可以使用同一个实例来维持一个新的自动心跳
 * `select_one`
-   * 它将返回指定服务的一个健康实例,可以通过ip+port来得访问该实例提供的服务
+   * 它将返回指定服务的一个健康实例的服务地址
    * 示例:
 ```
-test_beat = NacosInstance(...).select_one('test-beat')
-if test_beat:
-    api = '/testjson'
-    url = 'http://{test_beat.ip}:{test_beat.port}{api}'
+ni = NacosInstance(...)
+...
+host = ni.select_one('test-beat')
+if host:
+    url = 'http://{host}/testjson'
     res = request('GET', url)
     print(res.text)
 ```

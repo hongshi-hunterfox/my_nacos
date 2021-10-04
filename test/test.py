@@ -1,6 +1,6 @@
 # coding=utf-8
 
-from source import  NacosConfig, ConfigBufferMode
+from py_nacos import NacosConfig, ConfigBufferMode
 
 
 # 这个 Nacos 服务启用了 auth

@@ -14,8 +14,7 @@ from .threads import ThreadBeat, ConfigListener
 from .exceptions import NacosException, NacosClientException
 from .consts import DEFAULT_GROUP_NAME, ConfigBufferMode
 from .models import Service, ServicesList, Switches, Metrics, Server, \
-    InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, InstanceItem, \
-    ConfigData
+    InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, ConfigData
 
 
 class Token(object):
@@ -487,6 +486,11 @@ class NacosService(NacosClient):
         # rsp = self.request(api)
         # return self._paras_body(rsp)
 
+    def blank_client(self):
+        # 服务装饰需要约定侵入参数,不自由
+        # 请在相应的函数中使用NacosInstance.select_one
+        pass
+
 
 class NacosInstance(NacosClient):
     """实例
@@ -599,13 +603,13 @@ class NacosInstance(NacosClient):
         rsp = self.request(api, params)
         return InstanceList(**self._paras_body(rsp))
 
-    def select_one(self, service, cluster=None)->Union[None,InstanceItem]:
-        """随机选取一名幸运观众 :)"""
+    def select_one(self, service, cluster=None)->Union[None, str]:
+        """随机选取一名幸运观众"""
         instances = self.list(service, cluster=cluster, healthy_only=True).hosts
         if len(instances) < 1:
             return None  # 'no healthy instances
         sel = randint(0, len(instances)-1)
-        return instances[sel]
+        return instances[sel].host
 
     @staticmethod
     def get_beat(service=None, ip=None, port=None, group=None,

@@ -2,7 +2,7 @@
 from datetime import datetime
 import uvicorn
 from fastapi import FastAPI
-from source import NacosInstance,NacosConfig,Beat
+from py_nacos import NacosInstance,NacosConfig,Beat
 
 
 def s_time_now():

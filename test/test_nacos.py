@@ -1,7 +1,7 @@
 # coding=utf-8
 import socket
-from source import NacosNameSpace,NacosService,NacosInstance,NacosConfig,\
-    InstanceItem
+from py_nacos import NacosNameSpace,NacosService,NacosInstance,\
+    NacosConfig,InstanceItem
 from typing import List,Callable
 
 
