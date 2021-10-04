@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from .dispatcher import NacosConfig, NacosService, NacosInstance, NacosNameSpace, DEFAULT_GROUP_NAME
 from .models import *
 from .buffer import *

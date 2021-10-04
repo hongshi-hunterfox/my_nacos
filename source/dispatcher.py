@@ -1,4 +1,4 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
 """Nacos API 调用"""
 import re, json, hashlib
 from copy import deepcopy

@@ -1,5 +1,5 @@
-# coding=utf-8
-"""配置信息的高速缓存"""
+# -*- coding: utf-8 -*-
+"""Configured data cache"""
 import os, hashlib
 from datetime import datetime
 from abc import abstractmethod, ABCMeta

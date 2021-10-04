@@ -1,4 +1,4 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
 import yaml, json
 from pydantic import BaseModel
 from typing import Optional,List,Any
