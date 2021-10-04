@@ -19,6 +19,7 @@ from .models import Service, ServicesList, Switches, Metrics, Server, \
 
 
 class Token(object):
+    """在accessToken未过期时,它不会重复请求"""
     def __init__(self, server,user,pwd):
         self.server = server
         self.token = None
@@ -48,7 +49,9 @@ class Token(object):
 
 
 class NacosClient(object):
-    """API封装基础类"""
+    """API封装基础类
+        这不是异步的,所有需要异步的请求,应当在新的线程中去执行
+    """
     @staticmethod
     def _parse_server_addr(url: str) -> str:
         """为服务地址补全协议头、端口"""
@@ -184,6 +187,14 @@ class NacosConfig(NacosClient):
     def listening(self, data_id, group=None, tenant=None):
         """添加自动监听配置项"""
         self.listen_thread.add(data_id, group, tenant)
+
+    def stop_listen(self, data_id=None, group=None, tenant=None):
+        """停止对指定配置的监听"""
+        if self.listen_thread:
+            if data_id:
+                self.listen_thread.delete(data_id, group, tenant)
+            else:
+                self.listen_thread = None
 
     def listener(self, listening):
         """监听配置"""
@@ -588,11 +599,11 @@ class NacosInstance(NacosClient):
         rsp = self.request(api, params)
         return InstanceList(**self._paras_body(rsp))
 
-    def select_one(self, service, cluster=None)->InstanceItem:
+    def select_one(self, service, cluster=None)->Union[None,InstanceItem]:
         """随机选取一名幸运观众 :)"""
         instances = self.list(service, cluster=cluster, healthy_only=True).hosts
         if len(instances) < 1:
-            raise NacosClientException(f'no healthy instances for service {service}')
+            return None  # 'no healthy instances
         sel = randint(0, len(instances)-1)
         return instances[sel]
 
@@ -656,7 +667,7 @@ class NacosInstance(NacosClient):
         if beat:
             s_beat = str(beat)
             if s_beat not in self.beat_threads.keys():
-                self.beat_threads[s_beat] = ThreadBeat(self.beating,0,beat)
+                self.beat_threads[s_beat] = ThreadBeat(self.beating, 0, beat)
 
     def beating_stop(self, beat:Beat):
         """停止自动心跳
