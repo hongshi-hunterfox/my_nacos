@@ -5,21 +5,21 @@ from source import NacosNameSpace,NacosService,NacosInstance,NacosConfig,\
 from typing import List,Callable
 
 
-CONST_NACOS_LOGON = ('10.126.8.80:8001', None, None)
+CONST_NACOS_LOGON = ('localhost:8001', None, None)
 
 
 class TestNacosClient(object):
     """这个 Nacose 服务是无验证的
     使用了命名空间对配置和服务进行分组
     包含了较多测试数据"""
-    server_addr = '10.126.8.80:8001'
+    server_addr = None
     user=None
     pwd=None
     tenant = 'dev'  # 默认命名空间
     service_list = ['ces-ois','ces-post-loan','ces-open-api']
     configs = {
-        'ces-post-loan-dev.yaml': [
-            'outbound.ai.jobclasses'
+        'xml_data': [
+            'movie[0].format'
         ]
     }
 
@@ -86,7 +86,7 @@ class TestNacosClient(object):
                 print(f'\t\t{path}: {data}')
 
 
-t = TestNacosClient(CONST_NACOS_LOGON)
+t = TestNacosClient(*CONST_NACOS_LOGON)
 t.show_local_ip()  # 显示本机IP
 t.show_switches()  # 显示系统设置
 t.show_instance()  # 显示所有服务实例

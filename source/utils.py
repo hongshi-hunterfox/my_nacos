@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""扩展功能"""
 from xml.dom import minidom,Node
 
 
@@ -97,7 +98,6 @@ class Properties2Dict(object):
                 continue  # multiline is not ended
             point = split_point(buf)
             attr, value = buf[:point],buf[point + 1:]
-            print(f'{attr}:{value}')
             set_key(obj, attr.split('.'), value)
             buf=None
         return obj

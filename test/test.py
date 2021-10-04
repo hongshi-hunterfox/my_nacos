@@ -1,5 +1,5 @@
 # coding=utf-8
-from datetime import datetime
+
 from source import  NacosConfig, ConfigBufferMode
 
 
@@ -98,9 +98,7 @@ print(f'a.group:{a.group_value}')
 print(f'a.keys():{a.keys()}')
 # __call__ 装饰效果
 print(f'a():{a()}')
-print('-----------------------')
 b=Test('new instance')
 print(f'b.OtherField:{b.OtherField}')
-print('-----------------------')
-oo=ncs.get('Properties-config')
-print(oo.data_obj)
+config_value=ncs.get('Properties-config').value('a.b.d')
+print(f'Properties-config.a.b.d:{config_value}')
