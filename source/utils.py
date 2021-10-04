@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
-from xml.dom import minidom
+from xml.dom import minidom,Node
 
 
 class Xml2Dict(object):
     """XML数据转为字典
+        节点属性不处理,不输出
     >>> s = '''
     ... <a title="aaa">
-    ...   <b title="Enemy"><type>Thriller</type></b>
+    ...   <b title="Enemy"><type>Thriller
+    ...             4444</type></b>
     ...   <b title="Trans"><type>Action</type></b>
+    ...   <int_value type="integer">123</int_value>
+    ...   <date_value type="datetime">2021-03-18</date_value>
     ... </a>'''
-    >>> x=Xml2Dict.loads(s)
-    >>> x['b'][1]['type']=='Action'
-    True
+    >>> Xml2Dict.loads(s)
+    {'b': [{'type': 'Thriller...'2021-03-18'}
     """
     @staticmethod
     def load(file)->dict:
@@ -26,37 +29,39 @@ class Xml2Dict(object):
         return Xml2Dict.get_dict(dom.documentElement)
 
     @staticmethod
-    def value2list(_dict, name):
-        if not isinstance(_dict[name], list):
-            _dict[name] = [_dict[name]]
-    @staticmethod
-    def get_dict(node)->dict:
-        if node.nodeType == 1 and \
-                node.firstChild == node.lastChild and \
-                isinstance(node.firstChild, minidom.Text):
-            return node.firstChild.data
-        else:
-            obj = dict(node.attributes.items())
-            for child in node.childNodes:
-                if child.localName:
-                    name, value = child.nodeName, Xml2Dict.get_dict(child)
-                    if name in obj.keys():
-                        if not isinstance(obj[name], list):
-                            obj[name] = [obj[name]]
-                            obj[name].append(value)
-                    else:
-                        obj[name] = value
-            return obj
+    def get_dict(node: minidom.Node)->dict:
+        """返回dom 节点对应的值"""
+        if isinstance(node, minidom.Childless):
+            return node.nodeValue
+        obj = {}
+        for child in node.childNodes:
+            if child.nodeType in (Node.COMMENT_NODE,):
+                continue
+            name, value = child.nodeName, Xml2Dict.get_dict(child)
+            if name not in obj.keys():
+                obj[name] = value
+            elif not isinstance(obj[name], list):
+                obj[name] = [obj[name]]
+                obj[name].append(value)
+        if '#text' in obj.keys():
+            if len(obj.keys())>1:
+                obj.pop('#text')
+            else:
+                obj = obj['#text']
+        return obj
 
 
-class Properties(object):
+class Properties2Dict(object):
+    """properties格式配置数据转字典"""
     @staticmethod
-    def load(file):
+    def load(file)->dict:
+        """从文档载入"""
         with open(file, 'r') as f:
-            Properties.loads(f.read())
+            return Properties2Dict.loads(f.read())
 
     @staticmethod
-    def loads(data):
+    def loads(data)->dict:
+        """从文本载入"""
         def split_point(s):
             if ':' not in s:
                 return s.index('=') if '=' in s else 0

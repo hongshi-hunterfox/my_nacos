@@ -43,6 +43,7 @@ class ThreadBeat(Thread):
     """
     def loop(self):
         if callable(self.executor):
+            print('ThreadBeat.loop')
             beat_info = self.executor(*self.args)
             interval = float(beat_info.clientBeatInterval / 1000)
             self.thread = Timer(interval, self.loop)
@@ -63,6 +64,8 @@ class ConfigListener(Thread):
         """添加一个监听项"""
         key = (data_id, group, tenant)
         self.listens[key] = md5
+        if self.thread is None:
+            self.start()
 
     def update(self, data_id, group=None, tenant=None, md5=''):
         """更新监听项的值(MD5)"""
@@ -75,12 +78,13 @@ class ConfigListener(Thread):
         key = (data_id, group, tenant)
         if key in self.listens.keys():
             self.listens.pop(key)
+        if not self.listening:
+            self.stop()
 
     def loop(self):
-        listening = self.listening
-        if callable(self.executor):
-            if listening:
-                self.executor(listening)
+        if callable(self.executor) and self.listening:
+            print('ConfigListener.loop')
+            self.executor(self.listening)
             self.thread = Timer(self.interval, self.loop)
             self.thread.start()
 

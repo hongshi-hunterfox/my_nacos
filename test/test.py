@@ -6,12 +6,51 @@ from source import  NacosConfig, ConfigBufferMode
 # 这个 Nacos 服务启用了 auth
 ncs = NacosConfig('localhost', 'nacos', 'nacos',
                   buffer_mode=ConfigBufferMode.memory)
-_data ="""# 测试数据
+def_config_data = [
+    {'data_id':'test_json','type':'yaml','data':'''# 测试数据
 keys:
     accessKey: <<accessKey>>
     secretKey: <<secretKey>>
-group: <<group>>"""
-ncs.post('test_json',_data, data_type='yaml')
+group: <<group>>'''},
+    {'data_id':'xml_data','type':'xml','data':'''<collection shelf="New Arrivals">
+<movie title="Enemy Behind">
+   <type>War, Thriller</type>
+   <format>DVD</format>
+   <year>2003</year>
+   <rating>PG</rating>
+   <stars>10</stars>
+   <description>Talk about a US-Japan war</description>
+</movie>
+<movie title="Transformers">
+   <type>Anime, Science Fiction</type>
+   <format>DVD</format>
+   <year>1989</year>
+   <rating>R</rating>
+   <stars>8</stars>
+   <description>A schientific fiction</description>
+</movie>
+   <movie title="Trigun">
+   <type>Anime, Action</type>
+   <format>DVD</format>
+   <episodes>4</episodes>
+   <rating>PG</rating>
+   <stars>10</stars>
+   <description>Vash the Stampede!</description>
+</movie>
+<movie title="Ishtar">
+   <type>Comedy</type>
+   <format>VHS</format>
+   <rating>PG</rating>
+   <stars>2</stars>
+   <description>Viewable boredom</description>
+</movie>
+</collection>'''},
+    {'data_id':'Properties-config','type':'properties','data':'''a.b.d=v1
+a.c=v2
+d.e=v3
+f=v4'''}]
+for item in def_config_data:
+    ncs.post(item['data_id'], item['data'], data_type=item['type'])
 
 
 # 类装饰器 values
@@ -63,8 +102,5 @@ print('-----------------------')
 b=Test('new instance')
 print(f'b.OtherField:{b.OtherField}')
 print('-----------------------')
-now = lambda : datetime.now().timestamp()
-t = now()
-print(f'-0--{now() - t}-')
-ncs.listening('test_json')
-print(f'-1--{now() - t}-')
+oo=ncs.get('Properties-config')
+print(oo.data_obj)

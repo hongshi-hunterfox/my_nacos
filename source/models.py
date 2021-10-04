@@ -3,7 +3,7 @@ import yaml, json
 from pydantic import BaseModel
 from typing import Optional,List,Any
 from .exceptions import NacosClientException
-from .utils import Xml2Dict,Properties
+from .utils import Xml2Dict,Properties2Dict
 
 
 class ConfigData(BaseModel):
@@ -20,7 +20,7 @@ class ConfigData(BaseModel):
         elif self.config_type == 'xml':
             return Xml2Dict.loads(self.data)
         elif self.config_type == 'properties':
-            return Properties.loads(self.data)
+            return Properties2Dict.loads(self.data)
         else:  # text/html
             return self.data
 
@@ -165,7 +165,7 @@ class Beat(BaseModel):
     weight: int = 1
 
     def __str__(self):
-        return self.json(separators=(',',':'), exclude={'metadata'})
+        return self.json(separators=',:', exclude={'metadata'})
 
 
 class BeatInfo(BaseModel):

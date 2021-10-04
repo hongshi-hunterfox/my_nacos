@@ -164,6 +164,9 @@ class NacosConfig(NacosClient):
             self.buffer = new_buffer(buffer_mode, ip, eval(port))
         self.listen_thread = ConfigListener(self.listener)
 
+    def __del__(self):
+        self.listen_thread = None
+
     @classmethod
     def _paras(cls, rsp: Response) -> ConfigData:
         """从 Response 生产 ConfigData"""
@@ -504,6 +507,9 @@ class NacosInstance(NacosClient):
         super().__init__(*args, **kwargs)
         self.beat_threads = {}
 
+    def __del__(self):
+        self.beat_threads = {}
+
     def register(self, service, ip, port,
                  name_space=None,weight=None,enabled=None,healthy=None,
                  metadata=None,cluster=None,group=None,ephemeral=None
@@ -629,7 +635,7 @@ class NacosInstance(NacosClient):
             service = beat.serviceName.split('@')[-1]
         group = group if group else DEFAULT_GROUP_NAME
         params = self.params(serviceName=service,
-                             beat=new_beat.json(separators=(',',':')),
+                             beat=new_beat.json(separators=',:'),
                              groupName=group,
                              ephemeral=ephemeral)
         rsp = self.request(api, params, method='PUT')
