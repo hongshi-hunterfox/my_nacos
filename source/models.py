@@ -3,27 +3,30 @@ import yaml, json
 from pydantic import BaseModel
 from typing import Optional,List,Any
 from .exceptions import NacosClientException
+from .utils import Xml2Dict,Properties
 
 
 class ConfigData(BaseModel):
     config_type: str
     config_md5: str
     data: str
-    dict_obj: Optional[Any]
 
-    def build_dict(self):
+    @property
+    def data_obj(self):
         if self.config_type == 'yaml':
-            self.dict_obj = yaml.load(self.data, Loader=yaml.SafeLoader)
+            return yaml.load(self.data, Loader=yaml.SafeLoader)
         elif self.config_type == 'json':
-            self.dict_obj = json.loads(self.data)
-        else:
-            self.dict_obj = self.data
+            return json.loads(self.data)
+        elif self.config_type == 'xml':
+            return Xml2Dict.loads(self.data)
+        elif self.config_type == 'properties':
+            return Properties.loads(self.data)
+        else:  # text/html
+            return self.data
 
     def value(self, path: str):
         path = path if path else ''
-        if self.dict_obj is None:
-            self.build_dict()
-        data = self.dict_obj
+        data = self.data_obj
         try:
             for key in path.split('.'):
                 data = data[key]
