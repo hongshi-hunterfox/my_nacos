@@ -2,7 +2,7 @@
 from datetime import datetime
 import uvicorn
 from fastapi import FastAPI
-from py_nacos import NacosInstance,NacosConfig,Beat
+from py_nacos import NacosInstance, NacosConfig, Beat
 
 
 def s_time_now():
@@ -40,6 +40,7 @@ def down():
     ni.beating_stop(beat)
     return 'ok'
 
+
 @app.router.get('/testjson')
 def testjson():
     """返回该配置的当前值"""
@@ -47,9 +48,10 @@ def testjson():
 
 
 ni.beating_start(beat)  # 这将开始并保持 test-beat 服务的自动心跳
-nc.listening('test_json')  # 这将开始对配置 test_json 的监听
-uvicorn.run(app = app,
-            host = '127.0.0.1',
-            port = 7333,
+nc.start_listen('test_json')  # 这将开始对配置 test_json 的监听
+uvicorn.run(app=app,
+            host='127.0.0.1',
+            port=7333,
             )
+nc.stop_listen('test_json')
 ni.beating_stop(beat)
