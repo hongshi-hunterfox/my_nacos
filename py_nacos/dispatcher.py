@@ -1,25 +1,28 @@
 # -*- coding: utf-8 -*-
 """Nacos API 调用"""
-import re, json, hashlib
+import re
+import json
+import hashlib
 from copy import deepcopy
 from random import randint
 from functools import wraps
 from datetime import datetime
-from urllib.parse import urlencode,unquote
-from requests import Response, request
-from typing import Union,Callable,Any,List,Dict
+from urllib.parse import urlencode, unquote
+from requests import Response, request, Session
+from typing import Union, Callable, Any, List, Dict
 
-from .buffer import new_buffer
-from .threads import ThreadBeat, ConfigListener
-from .exceptions import NacosException, NacosClientException
-from .consts import DEFAULT_GROUP_NAME, ConfigBufferMode
-from .models import Service, ServicesList, Switches, Metrics, Server, \
-    InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, ConfigData
+from buffer import new_buffer
+from threads import ThreadBeat, ConfigListener
+from exceptions import NacosException, NacosClientException
+from consts import DEFAULT_GROUP_NAME, ConfigBufferMode
+from models import Service, ServicesList, Switches, Metrics, Server, \
+    InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, ConfigData, \
+    Listening
 
 
 class Token(object):
     """在accessToken未过期时,它不会重复请求"""
-    def __init__(self, server,user,pwd):
+    def __init__(self, server, user, pwd):
         self.server = server
         self.token = None
         self.ttl = 0  # 失效时间
@@ -66,7 +69,7 @@ class NacosClient(object):
     def params(**kwargs) -> dict:
         """将所有命名参数整合为一个字典,排除值为None的"""
         d_result = {}
-        for k,v in kwargs.items():
+        for k, v in kwargs.items():
             if k in ['group', 'groupName'] and v is None:
                 v = DEFAULT_GROUP_NAME
             if v:
@@ -93,15 +96,15 @@ class NacosClient(object):
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
         return headers
 
-    def __init__(self, server: str, user:str=None,pwd:str=None):
+    def __init__(self, server: str, user: str = None, pwd: str = None):
         self.server = self._parse_server_addr(server)
         self.token = Token(self.server, user, pwd) if user and pwd else None
 
-    def _get_full_path(self, *args, params:dict=None) -> str:
+    def _get_full_path(self, *args, params: dict = None) -> str:
         """生成请求地址
         params:需要附加到url中的参数
         """
-        url = '/'.join(filter(lambda _:_, '/'.join(args).split('/')))
+        url = '/'.join(filter(lambda _: _, '/'.join(args).split('/')))
         url = url.replace(':/', '://')
         if self.token:
             params = params if params else {}
@@ -112,11 +115,15 @@ class NacosClient(object):
             url = url + '?' + urlencode(params)
         return url
 
-    def request(self, path:str, params:dict=None,
-                method:str='GET',headers=None
+    def request(self,
+                path: str,
+                params: dict = None,
+                method: str = 'GET',
+                headers: Dict[str, Any] = None,
+                keep_alive: bool = False
                 ) -> Response:
         """各种请求方式实现"""
-        assert method in['POST', 'GET','PUT','DELETE'],\
+        assert method in ['POST', 'GET', 'PUT', 'DELETE'],\
             NacosClientException('不支持的请求方法')
         headers = self._def_headers(headers)
         data = None
@@ -125,8 +132,14 @@ class NacosClient(object):
             data = urlencode(params)
         else:  # GET,PUT,DELETE
             url = self._get_full_path(self.server, path, params=params)
-        rsp = request(method, url, data=data, headers=headers)
-        if rsp is None or rsp.status_code != 200:
+        if keep_alive:
+            with Session() as s:
+                rsp = s.request(method, url, data=data, headers=headers)
+        else:
+            rsp = request(method, url, data=data, headers=headers)
+        if rsp is None:
+            raise NacosException('time out', f'{method} {url}')
+        elif rsp.status_code != 200:
             raise NacosException(rsp.status_code, rsp.text)
         return rsp
 
@@ -141,37 +154,50 @@ class NacosConfig(NacosClient):
     >>> data = {"serviceName":"ces-ois","healthyOnly":True,"namespaceId":"dev","groupName":"DEFAULT_GROUP"}
     >>> nc.post('test_update',data,data_type='JSON')
     True
-    >>> data = 'serviceName: ces-ois\\nhealthyOnly: true\\nnamespaceId: dev\\ngroupName: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    >>> data = 'serviceName: ces-ois\\n' +
+    ...        'healthyOnly: true\\n' +
+    ...        'namespaceId: dev\\n' +
+    ...        'groupName: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     >>> nc.post('test_update', data, data_type='yaml')
     True
     >>> nc.delete('test_update')
     True
-    >>> history = nc.history('test_yaml')
-    >>> history['totalCount']
+    >>> histories = nc.history('test_yaml')
+    >>> histories['totalCount']
     2
-    >>> [_['id'] for _ in history['pageItems']]
+    >>> list(map(lambda _: _['id'], histories['pageItems']))
     ['52', '4']
-    >>> history = nc.history('test_yaml', nid=history['pageItems'][0]['id'])
+    >>> history = nc.history('test_yaml', nid=histories['pageItems'][0]['id'])
     >>> history is not None
     True
     """
     def __init__(self, *args,
-                 buffer_mode:ConfigBufferMode = ConfigBufferMode.nothing,
+                 buffer_mode: ConfigBufferMode = ConfigBufferMode.nothing,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.buffer = None
-        if buffer_mode and buffer_mode!=ConfigBufferMode.nothing:
+        if buffer_mode and buffer_mode != ConfigBufferMode.nothing:
             pattern = re.compile(r'http[s]?://([\w.]+):(\d+).*')
             ip, port = pattern.search(self.server).groups()
             self.buffer = new_buffer(buffer_mode, ip, eval(port))
         self.listen_thread = ConfigListener(self.listener)
 
-    def __del__(self):
-        self.listen_thread = None
+    @staticmethod  # 为对象实例填充属性
+    def _fetch_attrs(instance: object, data: dict):
+        _class = instance.__class__
+        for key in data.keys():
+            if key.startswith('__') and key.endswith('__'):
+                continue
+            if key in instance.__dict__.keys() and \
+                    instance.__dict__[key] is Callable:
+                continue
+            if key in _class.__dict__.keys() and \
+                    _class.__dict__[key] is Callable:
+                continue
+            setattr(instance, key, data.get(key))
 
-    @classmethod
+    @classmethod  # 从 Response 返回 ConfigData
     def _paras(cls, rsp: Response) -> ConfigData:
-        """从 Response 生产 ConfigData"""
         config = ConfigData(config_type=rsp.headers['config-type'],
                             config_md5=rsp.headers['content-md5'],
                             data=rsp.text)
@@ -183,49 +209,69 @@ class NacosConfig(NacosClient):
         except (BaseException,):
             pass
 
-    def listening(self, data_id, group=None, tenant=None):
-        """添加自动监听配置项"""
-        self.listen_thread.add(data_id, group, tenant)
+    def start_listen(self, data_id, group=None, tenant=None,
+                     path: str = None,
+                     event: Callable = None):
+        """添加自动监听配置项
+        event: 当配置项变更时,会将新值传递给 event
+        path: 可以指定配置路径,仅当该路径值变更时才传递新值到 event
+        for example:
+            # 当 test_json 有任何变更时打印它
+            .start_listen('test_json', print)
+            # 当 keys.accessKey 变更时刷新 token
+            .start_listen('test_json', path='keys.accessKey', self.token.refresh)
+        """
+        listen = Listening(data_id=data_id, group=group, tenant=tenant)
+        config = None
+        self.listen_thread.add(listen, config, path, event)
 
     def stop_listen(self, data_id=None, group=None, tenant=None):
         """停止对指定配置的监听"""
         if self.listen_thread:
             if data_id:
-                self.listen_thread.delete(data_id, group, tenant)
+                listen = Listening(data_id=data_id, group=group, tenant=tenant)
+                self.listen_thread.delete(listen)
             else:
                 self.listen_thread = None
 
     def listener(self, listening):
-        """监听配置"""
+        """监听配置
+        这个请求使用长连接
+        当配置没有变更时,服务器需要较长时间才有回应,需要在单独的线程中执行它
+        在不强制杀线程的方法时,程序结束可能需要等待该线程自然张志和,这需要时间
+        """
         api = '/nacos/v1/cs/configs/listener'
         params = {'Listening-Configs': listening}
         headers = {'Long-Pulling-Timeout': '30000'}
-        rsp = self.request(api, params, method='POST', headers=headers)
+        rsp = self.request(api, params,
+                           method='POST',
+                           headers=headers,
+                           keep_alive=True)
         if rsp.text == '':
             return  # 配置未发生变更
-        data = unquote(rsp.text).replace('\n','')
+        data = unquote(rsp.text).replace('\n', '')
         # 逐个配置更新
         for listen in data[:-1].split(chr(1)):
             params = listen.split(chr(2))
-            params[1] = None if params[1]==DEFAULT_GROUP_NAME else params[1]
-            try:
-                self.buffer.delete(params)
-            except (BaseException,):
-                pass
+            params[1] = None if params[1] == DEFAULT_GROUP_NAME else params[1]
             self.get(*params)
 
-    def get(self, data_id, group=None, tenant=None) -> ConfigData:
+    def get(self, data_id, group=None, tenant=None,
+            ignore_cache=False) -> ConfigData:
         """取配置值"""
-        try:
+        config = None
+        if self.buffer and not ignore_cache:
             config = self.buffer.get(data_id, group, tenant)
-        except (BaseException,):
-            config = None
         if config is None:
             api = '/nacos/v1/cs/configs'
             params = self.params(dataId=data_id, group=group, tenant=tenant)
             rsp = self.request(api, params)
             config = self._paras(rsp)
-            self.listen_thread.update(data_id, group, tenant, config.config_md5)
+            self.listen_thread.update(Listening(data_id=data_id,
+                                                group=group,
+                                                tenant=tenant,
+                                                md5=config.config_md5),
+                                      config)
             self.set_buffer(data_id, group, tenant, config)
         return config
 
@@ -235,7 +281,7 @@ class NacosConfig(NacosClient):
         发布配置时,data_id必需是已存在于Nacos服务中的"""
         api = '/nacos/v1/cs/configs'
         params = self.params(dataId=data_id, content=data, group=group,
-                             tenant=tenant,type=data_type)
+                             tenant=tenant, type=data_type)
         rsp = self.request(api, params, method='POST')
         success = self._paras_body(rsp)
         if success:
@@ -301,21 +347,6 @@ class NacosConfig(NacosClient):
             return call_func
         return func_wrapper
 
-    @staticmethod
-    def _fetch_attrs(instance:object, data:dict):
-        """为对象实例填充属性"""
-        _class = instance.__class__
-        for key in data.keys():
-            if key.startswith('__') and key.endswith('__'):
-                continue
-            if key in instance.__dict__.keys() and \
-                    instance.__dict__[key] is Callable:
-                continue
-            if key in _class.__dict__.keys() and \
-                    _class.__dict__[key] is Callable:
-                continue
-            setattr(instance, key, data.get(key))
-
     def values(self, data_id, path, group=None, tenant=None,
                only_class=False):
         """类装饰器
@@ -351,11 +382,14 @@ class NacosConfig(NacosClient):
                         setattr(_class, key, cfg.get(key))
                 if not only_class:
                     _class.__init__ = wrap_class_init(_class.__init__)
-                    _class.__call__= wrap_class_call(_class.__call__)
+                    _class.__call__ = wrap_class_call(_class.__call__)
             except (NacosException,):
                 pass
             return _class
         return class_wrapper
+
+    def bind(self):
+        pass
 
 
 class NacosService(NacosClient):
@@ -374,9 +408,9 @@ class NacosService(NacosClient):
     <class 'models.ServicesList'>
     >>> ns.delete('new.Service')
     True
-    >>> ns.switches('defaultPushCacheMillis', 9999)
+    >>> ns.set_switches('defaultPushCacheMillis', 9999)
     True
-    >>> type(ns.switches())
+    >>> type(ns.get_switches())
     <class 'models.Switches'>
     >>> type(ns.metrics())
     <class 'models.Metrics'>
@@ -389,7 +423,7 @@ class NacosService(NacosClient):
                ) -> bool:
         """创建服务"""
         api = '/nacos/v1/ns/service'
-        if metadata and not isinstance(metadata,str):
+        if metadata and not isinstance(metadata, str):
             metadata = json.dumps(metadata)
         if selector and not isinstance(selector, str):
             selector = json.dumps(selector)
@@ -412,12 +446,15 @@ class NacosService(NacosClient):
         rsp = self.request(api, params)
         return Service(**self._paras_body(rsp))
 
-    def update(self, service, protect_threshold:float,
-               group=None, name_space=None, metadata=None, selector=None
+    def update(self, service, protect_threshold: float,
+               group=None,
+               name_space=None,
+               metadata=None,
+               selector=None
                ) -> bool:
         """修改服务"""
         api = '/nacos/v1/ns/service'
-        if metadata and not isinstance(metadata,str):
+        if metadata and not isinstance(metadata, str):
             metadata = json.dumps(metadata)
         if selector and not isinstance(selector, str):
             selector = json.dumps(selector)
@@ -439,7 +476,7 @@ class NacosService(NacosClient):
         rsp = self.request(api, params, method='DELETE')
         return self._paras_body(rsp) == 'ok'
 
-    def list(self, page_no:int=1, page_size:int=10,
+    def list(self, page_no: int = 1, page_size: int = 10,
              group=None, name_space=None) -> ServicesList:
         """服务列表"""
         api = '/nacos/v1/ns/service/list'
@@ -457,7 +494,7 @@ class NacosService(NacosClient):
         return Switches(**self._paras_body(rsp))
 
     def set_switches(self, entry, value, debug=False
-                 ) -> Union[bool, Switches]:
+                     ) -> Union[bool, Switches]:
         """设置系统开关"""
         api = '/nacos/v1/ns/operator/switches'
         params = self.params(entry=entry,
@@ -466,13 +503,13 @@ class NacosService(NacosClient):
         rsp = self.request(api, params, method='PUT')
         return self._paras_body(rsp) == 'ok'
 
-    def metrics(self) ->Metrics:
+    def metrics(self) -> Metrics:
         """当前数据指标"""
         api = '/nacos/v1/ns/operator/metrics'
         rsp = self.request(api)
         return Metrics(**self._paras_body(rsp))
 
-    def servers(self, healthy:bool=None)-> List[Server]:
+    def servers(self, healthy: bool = None) -> List[Server]:
         """集群Server列表"""
         api = '/nacos/v1/ns/operator/servers'
         params = self.params(healthy=healthy)
@@ -508,9 +545,12 @@ class NacosInstance(NacosClient):
     'DEFAULT_GROUP@@new.Service'
     >>> type(ni.query('new.Service', '127.0.0.1', 8081))
     <class 'models.InstanceInfo'>
-    >>> type(ni.beating('new.Service', ip='127.0.0.1', port=8081))
+    >>> type(ni.beating(service='new.Service', ip='127.0.0.1', port=8081))
     <class 'models.BeatInfo'>
-    >>> type(ni.beating('new.Service', Beat(serviceName='DEFAULT_GROUP@@new.Service', ip='127.0.0.1', port=8081)))
+    >>> type(ni.beating(service='new.Service',
+    ...      beat=Beat(serviceName='DEFAULT_GROUP@@new.Service',
+    ...                ip='127.0.0.1',
+    ...                port=8081)))
     <class 'models.BeatInfo'>
     >>> ni.delete('new.Service', '127.0.0.1', 8081)
     True
@@ -518,20 +558,18 @@ class NacosInstance(NacosClient):
     True
     """
     beat_threads: Dict[str, ThreadBeat]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.beat_threads = {}
 
-    def __del__(self):
-        self.beat_threads = {}
-
     def register(self, service, ip, port,
-                 name_space=None,weight=None,enabled=None,healthy=None,
-                 metadata=None,cluster=None,group=None,ephemeral=None
-                 ) ->bool:
+                 name_space=None, weight=None, enabled=None, healthy=None,
+                 metadata=None, cluster=None, group=None, ephemeral=None
+                 ) -> bool:
         """注册实例"""
         api = '/nacos/v1/ns/instance'
-        if metadata and not isinstance(metadata,str):
+        if metadata and not isinstance(metadata, str):
             metadata = json.dumps(metadata)
         params = self.params(serviceName=service, ip=ip, port=port,
                              groupName=group,
@@ -547,7 +585,7 @@ class NacosInstance(NacosClient):
 
     def delete(self, service, ip, port,
                group=None, cluster=None, name_space=None, ephemeral=None
-               )->bool:
+               ) -> bool:
         """删除实例"""
         api = '/nacos/v1/ns/instance'
         params = self.params(serviceName=service, ip=ip, port=port,
@@ -559,11 +597,11 @@ class NacosInstance(NacosClient):
         return self._paras_body(rsp) == 'ok'
 
     def update(self, service, ip, port,
-               group=None,cluster=None,name_space=None,weight=None,
-               metadata=None,enabled=None,ephemeral=None)->bool:
+               group=None, cluster=None, name_space=None, weight=None,
+               metadata=None, enabled=None, ephemeral=None) -> bool:
         """更新实例"""
         api = '/nacos/v1/ns/instance'
-        if metadata and not isinstance(metadata,str):
+        if metadata and not isinstance(metadata, str):
             metadata = json.dumps(metadata)
         params = self.params(serviceName=service, ip=ip, port=port,
                              groupName=group,
@@ -578,7 +616,7 @@ class NacosInstance(NacosClient):
 
     def query(self, service, ip, port,
               group=None, name_space=None, cluster=None,
-              healthy_only=False, ephemeral=None) ->InstanceInfo:
+              healthy_only=False, ephemeral=None) -> InstanceInfo:
         """获取实例信息"""
         api = '/nacos/v1/ns/instance'
         params = self.params(serviceName=service, ip=ip, port=port,
@@ -591,8 +629,8 @@ class NacosInstance(NacosClient):
         return InstanceInfo(**self._paras_body(rsp))
 
     def list(self, service,
-             group=None,name_space=None,cluster=None,healthy_only=False
-             )->InstanceList:
+             group=None, name_space=None, cluster=None, healthy_only=False
+             ) -> InstanceList:
         """查询实例列表"""
         api = '/nacos/v1/ns/instance/list'
         params = self.params(serviceName=service,
@@ -603,7 +641,7 @@ class NacosInstance(NacosClient):
         rsp = self.request(api, params)
         return InstanceList(**self._paras_body(rsp))
 
-    def select_one(self, service, cluster=None)->Union[None, str]:
+    def select_one(self, service, cluster=None) -> Union[None, str]:
         """随机选取一名幸运观众"""
         instances = self.list(service, cluster=cluster, healthy_only=True).hosts
         if len(instances) < 1:
@@ -613,18 +651,19 @@ class NacosInstance(NacosClient):
 
     @staticmethod
     def get_beat(service=None, ip=None, port=None, group=None,
-                 cluster:str=None, scheduled:bool=None, weight:int=None,
-                 metadata:dict=None, beat:Beat=None)-> Beat:
+                 cluster: str = None, scheduled: bool = None,
+                 weight: int = None, metadata: dict = None, beat: Beat = None
+                 ) -> Beat:
         assert beat or (service and ip and port)
         if beat is None:
             group = group if group else DEFAULT_GROUP_NAME
             beat = Beat(serviceName=f'{group}@@{service}',
                         ip=ip,
                         port=port)
-        if cluster: beat.cluster = cluster
-        if scheduled: beat.scheduled = scheduled
-        if weight: beat.weight = weight
-        if metadata: beat.metadata = metadata
+        beat.cluster = cluster if cluster else beat.cluster
+        beat.scheduled = scheduled if scheduled else beat.scheduled
+        beat.weight = weight if weight else beat.weight
+        beat.metadata = metadata if metadata else beat.metadata
         return beat
 
     def calc_item(self, d: Union[dict, list, tuple]):
@@ -635,10 +674,10 @@ class NacosInstance(NacosClient):
             elif isinstance(v, (list, tuple)):
                 self.calc_item(d[k])
 
-    def beating(self, beat:Beat=None, service=None, ip=None, port=None,
-                group=None, cluster:str=None, scheduled:bool=None,
-                weight: int = None, metadata:dict=None, ephemeral=None,
-                )->BeatInfo:
+    def beating(self, beat: Beat = None, service=None, ip=None, port=None,
+                group=None, cluster: str = None, scheduled: bool = None,
+                weight: int = None, metadata: dict = None, ephemeral=None,
+                ) -> BeatInfo:
         """实例心跳"""
         api = '/nacos/v1/ns/instance/beat'
         beat = self.get_beat(service=service, ip=ip, port=port, group=group,
@@ -673,7 +712,7 @@ class NacosInstance(NacosClient):
             if s_beat not in self.beat_threads.keys():
                 self.beat_threads[s_beat] = ThreadBeat(self.beating, 0, beat)
 
-    def beating_stop(self, beat:Beat):
+    def beating_stop(self, beat: Beat):
         """停止自动心跳
         """
         if beat:
@@ -707,14 +746,14 @@ class NacosNameSpace(NacosClient):
             raise NacosException(result['message'])
         return [NameSpace(**item) for item in result['data']]
 
-    def create(self, name_space:str, show_name: str, desc: str=None)->bool:
+    def create(self, name_space: str, show_name: str, desc: str = None) -> bool:
         paras = self.params(customNamespaceId=name_space,
                             namespaceName=show_name,
                             namespaceDesc=desc)
         rsp = self.request(self.api, paras, method='POST')
         return self._paras_body(rsp)
 
-    def update(self, name_space:str, show_name: str, desc: str)->bool:
+    def update(self, name_space: str, show_name: str, desc: str) -> bool:
         """修改命名空间"""
         paras = self.params(namespace=name_space,
                             namespaceShowName=show_name,
@@ -722,7 +761,7 @@ class NacosNameSpace(NacosClient):
         rsp = self.request(self.api, paras, method='PUT')
         return self._paras_body(rsp)
 
-    def delete(self, name_space:str)->bool:
+    def delete(self, name_space: str) -> bool:
         paras = self.params(namespaceId=name_space)
         rsp = self.request(self.api, paras, method='DELETE')
         return self._paras_body(rsp)
@@ -733,4 +772,3 @@ if __name__ == '__main__':
     import doctest
     doctest.testmod(optionflags=doctest.ELLIPSIS)
 '''
-

@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-import yaml, json, re
+import yaml
+import json
+import re
 from pydantic import BaseModel
-from typing import Optional,List,Any
-from .exceptions import NacosClientException
-from .utils import Xml2Dict,Properties2Dict
+from typing import Optional, List, Any
+from consts import DEFAULT_GROUP_NAME
+from exceptions import NacosClientException
+from utils import Xml2Dict, Properties2Dict
 
 
 class ConfigData(BaseModel):
@@ -25,17 +28,19 @@ class ConfigData(BaseModel):
             return self.data
 
     def value(self, path: str):
-        re_idx = re.compile(r'(.+)\[(\d+)\]')
+        re_idx = re.compile(r'(.+)\[(\d+)]')
         path = path if path else ''
         data = self.data_obj
         try:
             for key in path.split('.'):
                 key_idx = re_idx.match(key)
                 if key_idx:
-                    key,idx = key_idx.groups()
+                    key, idx = key_idx.groups()
                     data = data[key][eval(idx)]
-                else:
+                elif key not in ('', None):
                     data = data[key]
+                else:
+                    break
         except (BaseException,) as err:
             raise NacosClientException(err)
         return data
@@ -190,3 +195,41 @@ class NameSpace(BaseModel):
     quota: int
     configCount: int
     type: int
+
+
+class Listening(BaseModel):
+    """监听项
+    >>> a = Listening(data_id='xml_data')
+    >>> b = Listening(data_id='xml_data')
+    >>> a == b
+    True
+    >>> dit = {a:33}
+    >>> dit[b]
+    33
+    """
+    data_id: str
+    group: Optional[str]
+    tenant: Optional[str]
+    md5: Optional[str]
+
+    def __str__(self):
+        lst = [self.data_id,
+               self.group if self.group else DEFAULT_GROUP_NAME,
+               self.md5 if self.md5 else '']
+        if self.tenant:
+            lst.append(self.tenant)
+        s = chr(2).join(lst)
+        return s + chr(1)
+
+    def __eq__(self, other):
+        return self.data_id == other.data_id and \
+               self.group == other.group and \
+               self.tenant == other.tenant
+
+    def __hash__(self):
+        return hash(self.json(exclude={'md5'}))
+
+
+if __name__ == '__main__':
+    import doctest
+    doctest.testmod(optionflags=doctest.ELLIPSIS)
