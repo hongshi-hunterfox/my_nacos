@@ -2,17 +2,16 @@
 
 from py_nacos import NacosConfig, ConfigBufferMode
 
-
 # 这个 Nacos 服务启用了 auth
 ncs = NacosConfig('localhost', 'nacos', 'nacos',
                   buffer_mode=ConfigBufferMode.memory)
 def_config_data = [
-    {'data_id':'test_json','type':'yaml','data':'''# 测试数据
+    {'data_id': 'test_json', 'type': 'yaml', 'data': '''# 测试数据
 keys:
     accessKey: <<accessKey>>
     secretKey: <<secretKey>>
 group: <<group>>'''},
-    {'data_id':'xml_data','type':'xml','data':'''<collection shelf="New Arrivals">
+    {'data_id': 'xml_data', 'type': 'xml', 'data': '''<collection shelf="New Arrivals">
 <movie title="Enemy Behind">
    <type>War, Thriller</type>
    <format>DVD</format>
@@ -45,7 +44,7 @@ group: <<group>>'''},
    <description>Viewable boredom</description>
 </movie>
 </collection>'''},
-    {'data_id':'Properties-config','type':'properties','data':'''a.b.d=v1
+    {'data_id': 'Properties-config', 'type': 'properties', 'data': '''a.b.d=v1
 a.c=v2
 d.e=v3
 f=v4'''}]
@@ -61,7 +60,8 @@ for item in def_config_data:
 class Test(object):
     OtherField = ['--OtherField--']
     secretKey = '--secretKey--'
-    def __init__(self,other_field=None):
+
+    def __init__(self, other_field=None):
         self.accessKey = None
         if other_field:
             self.OtherField = other_field
@@ -70,7 +70,7 @@ class Test(object):
         return f'{self.accessKey},{self.secretKey}'
 
     @property
-    @ncs.value('test_json','group') # value装饰器只能在@property装饰器之后
+    @ncs.value('test_json', 'group')  # value装饰器只能在@property装饰器之后
     def group_value(self):
         raise BaseException('不能读取配置信息')
 
@@ -98,7 +98,7 @@ print(f'a.group:{a.group_value}')
 print(f'a.keys():{a.keys()}')
 # __call__ 装饰效果
 print(f'a():{a()}')
-b=Test('new instance')
+b = Test('new instance')
 print(f'b.OtherField:{b.OtherField}')
-config_value=ncs.get('Properties-config').value('a.b.d')
+config_value = ncs.get('Properties-config').value('a.b.d')
 print(f'Properties-config.a.b.d:{config_value}')
