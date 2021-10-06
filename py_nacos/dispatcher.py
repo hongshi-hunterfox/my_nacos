@@ -11,10 +11,11 @@ from urllib.parse import urlencode, unquote
 from requests import Response, request, Session
 from typing import Union, Callable, Any, List, Dict
 
+from consts import DEFAULT_GROUP_NAME, ConfigBufferMode
+from exceptions import NacosException, NacosClientException
+from utils import calc_item
 from buffer import new_buffer
 from threads import ThreadBeat, ConfigListener
-from exceptions import NacosException, NacosClientException
-from consts import DEFAULT_GROUP_NAME, ConfigBufferMode
 from models import Service, ServicesList, Switches, Metrics, Server, \
     InstanceInfo, InstanceList, Beat, BeatInfo, NameSpace, ConfigData, \
     Listening
@@ -197,7 +198,7 @@ class NacosConfig(NacosClient):
             setattr(instance, key, data.get(key))
 
     @classmethod  # 从 Response 返回 ConfigData
-    def _paras(cls, rsp: Response) -> ConfigData:
+    def just2config(cls, rsp: Response) -> ConfigData:
         config = ConfigData(config_type=rsp.headers['config-type'],
                             config_md5=rsp.headers['content-md5'],
                             data=rsp.text)
@@ -266,7 +267,7 @@ class NacosConfig(NacosClient):
             api = '/nacos/v1/cs/configs'
             params = self.params(dataId=data_id, group=group, tenant=tenant)
             rsp = self.request(api, params)
-            config = self._paras(rsp)
+            config = self.just2config(rsp)
             self.listen_thread.update(Listening(data_id=data_id,
                                                 group=group,
                                                 tenant=tenant,
@@ -666,14 +667,6 @@ class NacosInstance(NacosClient):
         beat.metadata = metadata if metadata else beat.metadata
         return beat
 
-    def calc_item(self, d: Union[dict, list, tuple]):
-        """如果字典值、列表项是函数,使它们的值为函数的返回值"""
-        for k, v in d.items():
-            if callable(v):
-                d[k] = v()
-            elif isinstance(v, (list, tuple)):
-                self.calc_item(d[k])
-
     def beating(self, beat: Beat = None, service=None, ip=None, port=None,
                 group=None, cluster: str = None, scheduled: bool = None,
                 weight: int = None, metadata: dict = None, ephemeral=None,
@@ -684,7 +677,7 @@ class NacosInstance(NacosClient):
                              cluster=cluster, scheduled=scheduled,
                              weight=weight, metadata=metadata, beat=beat)
         new_beat = deepcopy(beat)
-        self.calc_item(new_beat.metadata)
+        calc_item(new_beat.metadata)
         if service is None:
             service = beat.serviceName.split('@')[-1]
         group = group if group else DEFAULT_GROUP_NAME

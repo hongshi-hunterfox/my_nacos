@@ -2,8 +2,8 @@
 import json
 from threading import Timer
 from typing import Dict, Callable, List, Optional
+
 from models import Listening, ConfigData
-# from exceptions import NacosClientException
 
 
 def _no_do(_):

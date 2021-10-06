@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 """扩展功能"""
+from typing import Union
 from xml.dom import minidom, Node
+
+
+def calc_item(d: Union[dict, list, tuple]):
+    """如果字典值、列表项是函数,使它们的值为函数的返回值"""
+    for k, v in d.items():
+        if callable(v):
+            d[k] = v()
+        elif isinstance(v, (list, tuple)):
+            calc_item(d[k])
 
 
 class Xml2Dict(object):

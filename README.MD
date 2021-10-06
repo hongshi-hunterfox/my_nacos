@@ -2,7 +2,7 @@
 
 ### 支持启用/未启用 auth 的 Nacos
 
-```buildoutcfg
+```
 # 启用 auth 的 Nacos
 ncs = NacosConfig('localhost', 'nacos', 'nacos')
 # 未启用 auth 的 Nacos
@@ -16,7 +16,7 @@ ncs = NacosConfig('localhost')
       * 它总是返回一个`ConfigData`对象
       * 想要得到配置中的一个具体的值,可以使用`ConfigData`的`value`方法:
          * `s = NacosConfig(...).get('Properties-config').value('a.b.d')`
-   * `listening()`
+   * `start_listen()`
       * 开始监听配置变更
       * 对同一个配置的监听请求只会生效一次
       * 当监听到配置的变更,会从Nacos服务获取相应的配置并更新本地缓存(如果有启用的话)
@@ -34,12 +34,12 @@ ncs = NacosConfig('localhost')
 > 示例代码 `test/test.py`
 
 
-### NacosInstance
-* `NacosInstance` 提供服务实例注册功能，同时，简化服务心跳处理，提供了`beating_start`和`beating_stop`
-* 一个`NacosInstance`实例同时最多维持一个自动心跳,当停止一个自动心跳后,可以使用同一个实例来维持一个新的自动心跳
-* `select_one`
-   * 它将返回指定服务的一个健康实例的服务地址
-   * 示例:
+* NacosInstance
+   * `NacosInstance` 提供服务实例注册功能，同时，简化服务心跳处理，提供了`beating_start`和`beating_stop`
+   * 一个`NacosInstance`实例同时最多维持一个自动心跳,当停止一个自动心跳后,可以使用同一个实例来维持一个新的自动心跳
+   * `select_one`
+      * 它将返回指定服务的一个健康实例的服务地址
+      * 示例:
 ```
 ni = NacosInstance(...)
 ...
@@ -50,15 +50,15 @@ if host:
     print(res.text)
 ```
 
-* `get_beat`
-   * 它用来创建自动心跳需要的参数:
-   * 参数`metadata`中的value可以引用无参数函数,它们将会在这里进行计算取值
-* `beating_start`
-   * 开始服务心跳循环
-   * 在`NacosInstance`实例未销毁期间，它将维持`beating`,直到:
-      * 以合适的参数调用了`beating_stop` 或 该`NacosInstance`实例销毁
-* `beating_stop`
-   * 停止相应服务的心跳循环
+   * `get_beat`
+      * 它用来创建自动心跳需要的参数:
+      * 参数`metadata`中的value可以引用无参数函数,它们将会在这里进行计算取值
+   * `beating_start`
+      * 开始服务心跳循环
+      * 在`NacosInstance`实例未销毁期间，它将维持`beating`,直到:
+         * 以合适的参数调用了`beating_stop` 或 该`NacosInstance`实例销毁
+   * `beating_stop`
+      * 停止相应服务的心跳循环
 
 
 > 示例代码 `test/test_beating.py`
@@ -87,5 +87,5 @@ if host:
     * 它假定在`localhost:8848`有一个启用了auth验证的Nacos服务
     * 它假定Nacos服务中有配置`test_json`
     * 它使用一个简单的webapi服务演示了自动服务心跳和配置监听功能
-    * 执行该示例后，在`http://127.0.0.1:7333/docs`页面可以测试相关的功能:
+    * 执行该示例后，在[http://127.0.0.1:7333/docs]()页面可以测试相关的功能:
 
