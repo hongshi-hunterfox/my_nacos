@@ -17,6 +17,7 @@ class MyThread(object):
         self.args = args
         self.interval = interval
         self.thread = None
+        self.daemon = repr(self).split()[-1][2:-1]
         self.start()
 
     @property  # 判断当前条件是否满足线程循环
@@ -42,6 +43,7 @@ class MyThread(object):
         if self.premise:
             self.action()
             self.thread = Timer(self.interval, self.loop)
+            self.thread.daemon = self.daemon
             self.thread.start()
 
     def action(self):
