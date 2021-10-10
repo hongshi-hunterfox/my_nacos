@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
-from threading import Timer
 from typing import Dict, Callable, List, Optional
+from threading import Timer
 
 from models import Listening, ConfigData
 
@@ -29,7 +29,6 @@ class MyThread(object):
             self.loop()
 
     def stop(self):
-        # TODO: 若有必要,杀死线程
         if self.thread:
             self.thread.cancel()
         self.thread = None
@@ -117,15 +116,17 @@ class ListenPath(object):
             self.events.remove(event)
         self._clean()
 
-    def update(self, new_value=None):
+    def update(self, new_value=None, path=None):
         """更新配置项值
         如果配置项值与记录时不同,更新 hash 值并通知所有绑定事件"""
         if new_value is None or self == new_value:
             return
         self.hash = hash(json.dumps(new_value))
+        self._clean()
         for event in self.events:
             try:
-                event(new_value)
+                if callable(event):
+                    event(new_value, path)
             finally:
                 pass
 
@@ -163,7 +164,7 @@ class ListenData(object):
             return
         self.md5 = config.config_md5
         for path, listen in self.listens.items():
-            listen.update(config.value(path))
+            listen.update(config.value(path), path=path)
 
     def add_listening(self,
                       config: Optional[ConfigData],

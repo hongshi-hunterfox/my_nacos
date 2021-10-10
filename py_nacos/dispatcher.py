@@ -337,7 +337,7 @@ class NacosConfig(NacosClient):
         """属性方法装饰器
         被装饰的属性总是返回nacos相应配置项的值
         """
-        def func_wrapper(func):
+        def wrapper(func):
             @wraps(func)
             def call_func(*args, **kwargs):
                 try:
@@ -346,7 +346,7 @@ class NacosConfig(NacosClient):
                     e_return = func(*args, **kwargs)
                 return e_return
             return call_func
-        return func_wrapper
+        return wrapper
 
     def values(self, data_id, path, group=None, tenant=None,
                only_class=False):
@@ -389,8 +389,17 @@ class NacosConfig(NacosClient):
             return _class
         return class_wrapper
 
-    def bind(self):
-        pass
+    def listening(self, data_id, path, group=None, tenant=None):
+        """配置监听装饰器
+        为一个函数自动监听指定的配置,当配置变更时该函数被触发
+        该函数必需能接受两个位置参数的调用形式: value, path
+        """
+        def wrapper(func):
+            if callable(func):
+                listen = Listening(data_id=data_id, group=group, tenant=tenant)
+                self.listen_thread.add(listen, None, path, func)
+            return func
+        return wrapper
 
 
 class NacosService(NacosClient):
