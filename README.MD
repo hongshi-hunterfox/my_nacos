@@ -64,7 +64,7 @@ if host:
       * 停止相应服务的心跳循环
 
 
-> 示例代码 `test/test_beating.py`
+> 示例代码:`test/test_beating.py`
 
 
 ### 关于配置的格式
