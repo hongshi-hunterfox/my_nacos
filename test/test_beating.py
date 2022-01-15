@@ -11,7 +11,8 @@ def s_time_now():
 
 app = FastAPI(title='NacosInstance.beating Test',
               description='Test method "beating_start" for class "NacosInstance"')
-CONST_NACOS_LOGON = ('localhost', 'nacos', 'nacos')
+
+CONST_NACOS_LOGON = ('localhost', 'nacos', 'nacos')  # 服务地址,账号,口令
 ni = NacosInstance(*CONST_NACOS_LOGON)
 nc = NacosConfig(*CONST_NACOS_LOGON)
 beat = Beat(serviceName='test-beat', ip='127.0.0.1', port=7333,

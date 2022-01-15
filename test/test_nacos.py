@@ -4,7 +4,8 @@ from typing import List, Callable
 from py_nacos import NacosNameSpace, NacosService, NacosInstance, NacosConfig
 
 
-CONST_NACOS_LOGON = ('localhost:8848', 'nacos', 'nacos')
+# CONST_NACOS_LOGON = ('localhost:8848', 'nacos', 'nacos')
+CONST_NACOS_LOGON = ('10.126.8.80:8001', None, None)
 
 
 class TestNacosClient(object):
@@ -91,4 +92,4 @@ t.show_switches()  # 显示系统设置
 t.show_instance()  # 显示所有服务实例
 t.show_service_at_local()  # 显示本机启动的服务
 t.show_service_by_list()  # 显示指定的服务实例
-t.show_configs()  # 显示指定的配置项
+# t.show_configs()  # 显示指定的配置项

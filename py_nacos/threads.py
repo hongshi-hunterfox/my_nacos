@@ -3,7 +3,7 @@ import json
 from typing import Dict, Callable, List, Optional
 from threading import Timer
 
-from models import Listening, ConfigData
+from .models import Listening, ConfigData
 
 
 def _no_do(_):

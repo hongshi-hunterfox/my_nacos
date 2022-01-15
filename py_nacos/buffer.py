@@ -6,9 +6,9 @@ from datetime import datetime
 from abc import abstractmethod, ABCMeta
 from typing import Dict, Union
 
-from consts import DEFAULT_GROUP_NAME, ConfigBufferMode
-from exceptions import NacosClientException
-from models import ConfigData
+from .consts import DEFAULT_GROUP_NAME, ConfigBufferMode
+from .exceptions import NacosClientException
+from .models import ConfigData
 
 
 BUFFER_MODE = ConfigBufferMode.nothing
