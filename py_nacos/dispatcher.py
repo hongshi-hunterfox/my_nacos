@@ -80,10 +80,11 @@ class NacosClient(object):
     @staticmethod
     def _paras_body(res: Response) -> Any:
         try:
-            if 'json' in res.headers['content-type']:
-                return json.loads(res.text)
-            else:  # 'text' in res.headers['content-type']:
-                e_data = res.text
+            # if 'json' in res.headers['content-type']:
+            #     return json.loads(res.text)
+            # else:  # 'text' in res.headers['content-type']:
+            #     e_data = res.text
+            e_data = json.loads(res.text)
         except (BaseException,):
             e_data = res.text
         return e_data
@@ -652,9 +653,9 @@ class NacosInstance(NacosClient):
         rsp = self.request('GET', api, params)
         return InstanceList(**self._paras_body(rsp))
 
-    def select_one(self, service, cluster=None) -> Union[None, str]:
+    def select_one(self, service, cluster=None, name_space=None) -> Union[None, str]:
         """随机选取一名幸运观众"""
-        instances = self.list(service, cluster=cluster, healthy_only=True).hosts
+        instances = self.list(service, cluster=cluster, name_space=name_space, healthy_only=True).hosts
         if len(instances) < 1:
             return None  # 'no healthy instances
         sel = randint(0, len(instances)-1)
