@@ -18,7 +18,7 @@ ncs = NacosConfig('localhost')
          * `s = NacosConfig(...).get('Properties-config').value('a.b.d')`
    * `start_listen()`
       * 开始监听配置变更
-      * 对同一个配置的监听请求只会生效一次
+      * 对同一个配置的监听请求只有最后一个生效
       * 当监听到配置的变更,会从Nacos服务获取相应的配置并更新本地缓存(如果有启用的话)
    * `stop_listen()`
       * 停止对某个配置的监听
@@ -48,7 +48,7 @@ ni = NacosInstance(...)
 ...
 host = ni.select_one('test-beat')
 if host:
-    url = 'http://{host}/testjson'
+    url = f'http://{host}/testjson'
     res = request('GET', url)
     print(res.text)
 ```
